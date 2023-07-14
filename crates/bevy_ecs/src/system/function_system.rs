@@ -144,7 +144,7 @@ impl SystemMeta {
 ///     }
 /// });
 /// ```
-pub struct SystemState<Param: SystemParam + 'static> {
+pub struct SystemState<Param: SystemParam> {
     meta: SystemMeta,
     param_state: Param::State,
     world_id: WorldId,
