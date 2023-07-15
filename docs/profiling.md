@@ -12,6 +12,8 @@ You also need to select a `tracing` backend using the following cargo features:
 
 `cargo run --release --features bevy/trace_chrome`
 
+Alternatively, if you're not using the main `bevy` dependency: `cargo run --release --features bevy_log/tracing-chrome`
+
 After running your app a `json` file in the "chrome tracing format" will be produced. You can open this file in your browser using <https://ui.perfetto.dev>. It will look something like this:
 
 ![image](https://user-images.githubusercontent.com/2694663/141657409-6f4a3ad3-59b6-4378-95ba-66c0dafecd8e.png)
