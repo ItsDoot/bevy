@@ -9,7 +9,7 @@ use thiserror::Error;
 #[derive(Component)]
 struct RegisteredSystem<I, O> {
     initialized: bool,
-    system: BoxedSystem<I, O>,
+    system: BoxedSystem<'static, I, O>,
 }
 
 /// Marker [`Component`](bevy_ecs::component::Component) for identifying [`SystemId`] [`Entity`]s.
@@ -22,7 +22,7 @@ pub struct SystemIdMarker;
 /// This struct is returned by [`World::remove_system`].
 pub struct RemovedSystem<I = (), O = ()> {
     initialized: bool,
-    system: BoxedSystem<I, O>,
+    system: BoxedSystem<'static, I, O>,
 }
 
 impl<I, O> RemovedSystem<I, O> {
@@ -33,7 +33,7 @@ impl<I, O> RemovedSystem<I, O> {
     }
 
     /// The system removed from the storage.
-    pub fn system(self) -> BoxedSystem<I, O> {
+    pub fn system(self) -> BoxedSystem<'static, I, O> {
         self.system
     }
 }
@@ -112,7 +112,12 @@ impl World {
     /// This allows for running systems in a pushed-based fashion.
     /// Using a [`Schedule`](crate::schedule::Schedule) is still preferred for most cases
     /// due to its better performance and ability to run non-conflicting systems simultaneously.
-    pub fn register_system<I: 'static, O: 'static, M, S: IntoSystem<I, O, M> + 'static>(
+    pub fn register_system<
+        I: 'static,
+        O: 'static,
+        M: 'static,
+        S: IntoSystem<'static, I, O, M> + 'static,
+    >(
         &mut self,
         system: S,
     ) -> SystemId<I, O> {
@@ -125,7 +130,7 @@ impl World {
     /// [`System`](crate::system::System) trait object and put in a [`Box`].
     pub fn register_boxed_system<I: 'static, O: 'static>(
         &mut self,
-        system: BoxedSystem<I, O>,
+        system: BoxedSystem<'static, I, O>,
     ) -> SystemId<I, O> {
         SystemId {
             entity: self
@@ -378,13 +383,16 @@ impl<I: 'static + Send> Command for RunSystemWithInput<I> {
 ///
 /// This command needs an already boxed system to register, and an already spawned entity
 pub struct RegisterSystem<I: 'static, O: 'static> {
-    system: BoxedSystem<I, O>,
+    system: BoxedSystem<'static, I, O>,
     entity: Entity,
 }
 
 impl<I: 'static, O: 'static> RegisterSystem<I, O> {
     /// Creates a new [Command] struct, which can be added to [Commands](crate::system::Commands)
-    pub fn new<M, S: IntoSystem<I, O, M> + 'static>(system: S, entity: Entity) -> Self {
+    pub fn new<M: 'static, S: IntoSystem<'static, I, O, M> + 'static>(
+        system: S,
+        entity: Entity,
+    ) -> Self {
         Self {
             system: Box::new(IntoSystem::into_system(system)),
             entity,

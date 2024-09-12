@@ -6,7 +6,7 @@ use crate::system::{
 };
 
 /// A type-erased run condition stored in a [`Box`].
-pub type BoxedCondition<In = ()> = Box<dyn ReadOnlySystem<In = In, Out = bool>>;
+pub type BoxedCondition<'s, In = ()> = Box<dyn ReadOnlySystem<'s, In = In, Out = bool> + 's>;
 
 /// A system that determines if one or more scheduled systems should run.
 ///
@@ -70,7 +70,7 @@ pub type BoxedCondition<In = ()> = Box<dyn ReadOnlySystem<In = In, Out = bool>>;
 /// # world.insert_resource(DidRun(false));
 /// # app.run(&mut world);
 /// # assert!(world.resource::<DidRun>().0);
-pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
+pub trait Condition<'s, Marker: 's, In: 's = ()>: sealed::Condition<'s, Marker, In> {
     /// Returns a new run condition that only returns `true`
     /// if both this one and the passed `and` return `true`.
     ///
@@ -115,7 +115,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     /// Note that in this case, it's better to just use the run condition [`resource_exists_and_equals`].
     ///
     /// [`resource_exists_and_equals`]: common_conditions::resource_exists_and_equals
-    fn and<M, C: Condition<M, In>>(self, and: C) -> And<Self::System, C::System> {
+    fn and<M: 's, C: Condition<'s, M, In>>(self, and: C) -> And<Self::System, C::System> {
         let a = IntoSystem::into_system(self);
         let b = IntoSystem::into_system(and);
         let name = format!("{} && {}", a.name(), b.name());
@@ -169,7 +169,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     #[deprecated(
         note = "Users should use the `.and(condition)` method in lieu of `.and_then(condition)`"
     )]
-    fn and_then<M, C: Condition<M, In>>(self, and_then: C) -> And<Self::System, C::System> {
+    fn and_then<M, C: Condition<'s, M, In>>(self, and_then: C) -> And<Self::System, C::System> {
         self.and(and_then)
     }
 
@@ -218,7 +218,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     ///     ),
     /// );
     /// ```
-    fn nand<M, C: Condition<M, In>>(self, nand: C) -> Nand<Self::System, C::System> {
+    fn nand<M: 's, C: Condition<'s, M, In>>(self, nand: C) -> Nand<Self::System, C::System> {
         let a = IntoSystem::into_system(self);
         let b = IntoSystem::into_system(nand);
         let name = format!("!({} && {})", a.name(), b.name());
@@ -270,7 +270,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     ///     ),
     /// );
     /// ```
-    fn nor<M, C: Condition<M, In>>(self, nor: C) -> Nor<Self::System, C::System> {
+    fn nor<M: 's, C: Condition<'s, M, In>>(self, nor: C) -> Nor<Self::System, C::System> {
         let a = IntoSystem::into_system(self);
         let b = IntoSystem::into_system(nor);
         let name = format!("!({} || {})", a.name(), b.name());
@@ -317,7 +317,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     /// # app.run(&mut world);
     /// # assert!(world.resource::<C>().0);
     /// ```
-    fn or<M, C: Condition<M, In>>(self, or: C) -> Or<Self::System, C::System> {
+    fn or<M: 's, C: Condition<'s, M, In>>(self, or: C) -> Or<Self::System, C::System> {
         let a = IntoSystem::into_system(self);
         let b = IntoSystem::into_system(or);
         let name = format!("{} || {}", a.name(), b.name());
@@ -367,7 +367,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     #[deprecated(
         note = "Users should use the `.or(condition)` method in lieu of `.or_else(condition)`"
     )]
-    fn or_else<M, C: Condition<M, In>>(self, or_else: C) -> Or<Self::System, C::System> {
+    fn or_else<M, C: Condition<'s, M, In>>(self, or_else: C) -> Or<Self::System, C::System> {
         self.or(or_else)
     }
 
@@ -416,7 +416,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     ///     ),
     /// );
     /// ```
-    fn xnor<M, C: Condition<M, In>>(self, xnor: C) -> Xnor<Self::System, C::System> {
+    fn xnor<M: 's, C: Condition<'s, M, In>>(self, xnor: C) -> Xnor<Self::System, C::System> {
         let a = IntoSystem::into_system(self);
         let b = IntoSystem::into_system(xnor);
         let name = format!("!({} ^ {})", a.name(), b.name());
@@ -458,7 +458,7 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     /// );
     /// # app.run(&mut world);
     /// ```
-    fn xor<M, C: Condition<M, In>>(self, xor: C) -> Xor<Self::System, C::System> {
+    fn xor<M: 's, C: Condition<'s, M, In>>(self, xor: C) -> Xor<Self::System, C::System> {
         let a = IntoSystem::into_system(self);
         let b = IntoSystem::into_system(xor);
         let name = format!("({} ^ {})", a.name(), b.name());
@@ -466,23 +466,26 @@ pub trait Condition<Marker, In = ()>: sealed::Condition<Marker, In> {
     }
 }
 
-impl<Marker, In, F> Condition<Marker, In> for F where F: sealed::Condition<Marker, In> {}
+impl<'s, Marker: 's, In: 's, F> Condition<'s, Marker, In> for F where
+    F: sealed::Condition<'s, Marker, In>
+{
+}
 
 mod sealed {
     use crate::system::{IntoSystem, ReadOnlySystem};
 
-    pub trait Condition<Marker, In>:
-        IntoSystem<In, bool, Marker, System = Self::ReadOnlySystem>
+    pub trait Condition<'s, Marker: 's, In: 's>:
+        IntoSystem<'s, In, bool, Marker, System = Self::ReadOnlySystem>
     {
         // This associated type is necessary to let the compiler
         // know that `Self::System` is `ReadOnlySystem`.
-        type ReadOnlySystem: ReadOnlySystem<In = In, Out = bool>;
+        type ReadOnlySystem: ReadOnlySystem<'s, In = In, Out = bool>;
     }
 
-    impl<Marker, In, F> Condition<Marker, In> for F
+    impl<'s, Marker: 's, In: 's, F> Condition<'s, Marker, In> for F
     where
-        F: IntoSystem<In, bool, Marker>,
-        F::System: ReadOnlySystem,
+        F: IntoSystem<'s, In, bool, Marker>,
+        F::System: ReadOnlySystem<'s>,
     {
         type ReadOnlySystem = F::System;
     }
@@ -1062,10 +1065,10 @@ pub mod common_conditions {
     /// app.run(&mut world);
     /// assert_eq!(world.resource::<Counter>().0, 0);
     /// ```
-    pub fn not<Marker, TOut, T>(condition: T) -> NotSystem<T::System>
+    pub fn not<'s, Marker: 's, TOut, T>(condition: T) -> NotSystem<T::System>
     where
-        TOut: std::ops::Not,
-        T: IntoSystem<(), TOut, Marker>,
+        TOut: std::ops::Not + 's,
+        T: IntoSystem<'s, (), TOut, Marker>,
     {
         let condition = IntoSystem::into_system(condition);
         let name = format!("!{}", condition.name());
@@ -1110,9 +1113,9 @@ pub mod common_conditions {
     /// app.run(&mut world);
     /// assert_eq!(world.resource::<Counter>().0, 2);
     /// ```
-    pub fn condition_changed<Marker, CIn, C: Condition<Marker, CIn>>(
+    pub fn condition_changed<'s, Marker: 's, CIn: 's, C: Condition<'s, Marker, CIn>>(
         condition: C,
-    ) -> impl Condition<(), CIn> {
+    ) -> impl Condition<'s, (), CIn> {
         condition.pipe(|In(new): In<bool>, mut prev: Local<bool>| -> bool {
             let changed = *prev != new;
             *prev = new;
@@ -1164,10 +1167,10 @@ pub mod common_conditions {
     /// app.run(&mut world);
     /// assert_eq!(world.resource::<Counter>().0, 2);
     /// ```
-    pub fn condition_changed_to<Marker, CIn, C: Condition<Marker, CIn>>(
+    pub fn condition_changed_to<'s, Marker: 's, CIn: 's, C: Condition<'s, Marker, CIn>>(
         to: bool,
         condition: C,
-    ) -> impl Condition<(), CIn> {
+    ) -> impl Condition<'s, (), CIn> {
         condition.pipe(move |In(new): In<bool>, mut prev: Local<bool>| -> bool {
             let now_true = *prev != new && new == to;
             *prev = new;
@@ -1186,7 +1189,7 @@ pub type NotSystem<T> = AdapterSystem<NotMarker, T>;
 #[derive(Clone, Copy)]
 pub struct NotMarker;
 
-impl<T: System> Adapt<T> for NotMarker
+impl<'s, T: System<'s>> Adapt<'s, T> for NotMarker
 where
     T::Out: Not,
 {
@@ -1219,19 +1222,19 @@ pub type Xor<A, B> = CombinatorSystem<XorMarker, A, B>;
 #[doc(hidden)]
 pub struct AndMarker;
 
-impl<In, A, B> Combine<A, B> for AndMarker
+impl<'s, In, A, B> Combine<'s, A, B> for AndMarker
 where
-    In: Copy,
-    A: System<In = In, Out = bool>,
-    B: System<In = In, Out = bool>,
+    In: Copy + 's,
+    A: System<'s, In = In, Out = bool>,
+    B: System<'s, In = In, Out = bool>,
 {
     type In = In;
     type Out = bool;
 
     fn combine(
         input: Self::In,
-        a: impl FnOnce(<A as System>::In) -> <A as System>::Out,
-        b: impl FnOnce(<B as System>::In) -> <B as System>::Out,
+        a: impl FnOnce(<A as System<'s>>::In) -> <A as System<'s>>::Out,
+        b: impl FnOnce(<B as System<'s>>::In) -> <B as System<'s>>::Out,
     ) -> Self::Out {
         a(input) && b(input)
     }
@@ -1240,19 +1243,19 @@ where
 #[doc(hidden)]
 pub struct NandMarker;
 
-impl<In, A, B> Combine<A, B> for NandMarker
+impl<'s, In: 's, A, B> Combine<'s, A, B> for NandMarker
 where
     In: Copy,
-    A: System<In = In, Out = bool>,
-    B: System<In = In, Out = bool>,
+    A: System<'s, In = In, Out = bool>,
+    B: System<'s, In = In, Out = bool>,
 {
     type In = In;
     type Out = bool;
 
     fn combine(
         input: Self::In,
-        a: impl FnOnce(<A as System>::In) -> <A as System>::Out,
-        b: impl FnOnce(<B as System>::In) -> <B as System>::Out,
+        a: impl FnOnce(<A as System<'s>>::In) -> <A as System<'s>>::Out,
+        b: impl FnOnce(<B as System<'s>>::In) -> <B as System<'s>>::Out,
     ) -> Self::Out {
         !(a(input) && b(input))
     }
@@ -1261,19 +1264,19 @@ where
 #[doc(hidden)]
 pub struct NorMarker;
 
-impl<In, A, B> Combine<A, B> for NorMarker
+impl<'s, In, A, B> Combine<'s, A, B> for NorMarker
 where
-    In: Copy,
-    A: System<In = In, Out = bool>,
-    B: System<In = In, Out = bool>,
+    In: Copy + 's,
+    A: System<'s, In = In, Out = bool>,
+    B: System<'s, In = In, Out = bool>,
 {
     type In = In;
     type Out = bool;
 
     fn combine(
         input: Self::In,
-        a: impl FnOnce(<A as System>::In) -> <A as System>::Out,
-        b: impl FnOnce(<B as System>::In) -> <B as System>::Out,
+        a: impl FnOnce(<A as System<'s>>::In) -> <A as System<'s>>::Out,
+        b: impl FnOnce(<B as System<'s>>::In) -> <B as System<'s>>::Out,
     ) -> Self::Out {
         !(a(input) || b(input))
     }
@@ -1282,19 +1285,19 @@ where
 #[doc(hidden)]
 pub struct OrMarker;
 
-impl<In, A, B> Combine<A, B> for OrMarker
+impl<'s, In: 's, A, B> Combine<'s, A, B> for OrMarker
 where
     In: Copy,
-    A: System<In = In, Out = bool>,
-    B: System<In = In, Out = bool>,
+    A: System<'s, In = In, Out = bool>,
+    B: System<'s, In = In, Out = bool>,
 {
     type In = In;
     type Out = bool;
 
     fn combine(
         input: Self::In,
-        a: impl FnOnce(<A as System>::In) -> <A as System>::Out,
-        b: impl FnOnce(<B as System>::In) -> <B as System>::Out,
+        a: impl FnOnce(<A as System<'s>>::In) -> <A as System<'s>>::Out,
+        b: impl FnOnce(<B as System<'s>>::In) -> <B as System<'s>>::Out,
     ) -> Self::Out {
         a(input) || b(input)
     }
@@ -1303,19 +1306,19 @@ where
 #[doc(hidden)]
 pub struct XnorMarker;
 
-impl<In, A, B> Combine<A, B> for XnorMarker
+impl<'s, In: 's, A, B> Combine<'s, A, B> for XnorMarker
 where
     In: Copy,
-    A: System<In = In, Out = bool>,
-    B: System<In = In, Out = bool>,
+    A: System<'s, In = In, Out = bool>,
+    B: System<'s, In = In, Out = bool>,
 {
     type In = In;
     type Out = bool;
 
     fn combine(
         input: Self::In,
-        a: impl FnOnce(<A as System>::In) -> <A as System>::Out,
-        b: impl FnOnce(<B as System>::In) -> <B as System>::Out,
+        a: impl FnOnce(<A as System<'s>>::In) -> <A as System<'s>>::Out,
+        b: impl FnOnce(<B as System<'s>>::In) -> <B as System<'s>>::Out,
     ) -> Self::Out {
         !(a(input) ^ b(input))
     }
@@ -1324,19 +1327,19 @@ where
 #[doc(hidden)]
 pub struct XorMarker;
 
-impl<In, A, B> Combine<A, B> for XorMarker
+impl<'s, In: 's, A, B> Combine<'s, A, B> for XorMarker
 where
     In: Copy,
-    A: System<In = In, Out = bool>,
-    B: System<In = In, Out = bool>,
+    A: System<'s, In = In, Out = bool>,
+    B: System<'s, In = In, Out = bool>,
 {
     type In = In;
     type Out = bool;
 
     fn combine(
         input: Self::In,
-        a: impl FnOnce(<A as System>::In) -> <A as System>::Out,
-        b: impl FnOnce(<B as System>::In) -> <B as System>::Out,
+        a: impl FnOnce(<A as System<'s>>::In) -> <A as System<'s>>::Out,
+        b: impl FnOnce(<B as System<'s>>::In) -> <B as System<'s>>::Out,
     ) -> Self::Out {
         a(input) ^ b(input)
     }

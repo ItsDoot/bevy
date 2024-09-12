@@ -342,9 +342,9 @@ impl Observers {
 
 impl World {
     /// Spawns a "global" [`Observer`] and returns its [`Entity`].
-    pub fn observe<E: Event, B: Bundle, M>(
+    pub fn observe<E: Event, B: Bundle, M: 'static>(
         &mut self,
-        system: impl IntoObserverSystem<E, B, M>,
+        system: impl IntoObserverSystem<'static, E, B, M> + 'static,
     ) -> EntityWorldMut {
         self.spawn(Observer::new(system))
     }

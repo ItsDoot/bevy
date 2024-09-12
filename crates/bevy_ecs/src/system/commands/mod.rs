@@ -713,8 +713,8 @@ impl<'w, 's> Commands<'w, 's> {
     pub fn register_system<
         I: 'static + Send,
         O: 'static + Send,
-        M,
-        S: IntoSystem<I, O, M> + 'static,
+        M: 'static,
+        S: IntoSystem<'static, I, O, M> + 'static,
     >(
         &mut self,
         system: S,
@@ -782,9 +782,9 @@ impl<'w, 's> Commands<'w, 's> {
     }
 
     /// Spawns an [`Observer`] and returns the [`EntityCommands`] associated with the entity that stores the observer.
-    pub fn observe<E: Event, B: Bundle, M>(
+    pub fn observe<E: Event, B: Bundle, M: 'static>(
         &mut self,
-        observer: impl IntoObserverSystem<E, B, M>,
+        observer: impl IntoObserverSystem<'static, E, B, M> + 'static,
     ) -> EntityCommands {
         self.spawn(Observer::new(observer))
     }
@@ -1348,7 +1348,10 @@ impl EntityCommands<'_> {
     }
 
     /// Creates an [`Observer`] listening for a trigger of type `T` that targets this entity.
-    pub fn observe<E: Event, B: Bundle, M>(self, system: impl IntoObserverSystem<E, B, M>) -> Self {
+    pub fn observe<E: Event, B: Bundle, M: 'static>(
+        self,
+        system: impl IntoObserverSystem<'static, E, B, M> + 'static,
+    ) -> Self {
         self.add(observe(system))
     }
 }
@@ -1579,8 +1582,8 @@ fn log_components(entity: Entity, world: &mut World) {
     info!("Entity {entity}: {debug_infos:?}");
 }
 
-fn observe<E: Event, B: Bundle, M>(
-    observer: impl IntoObserverSystem<E, B, M>,
+fn observe<E: Event, B: Bundle, M: 'static>(
+    observer: impl IntoObserverSystem<'static, E, B, M> + 'static,
 ) -> impl EntityCommand {
     move |entity, world: &mut World| {
         if let Some(mut entity) = world.get_entity_mut(entity) {

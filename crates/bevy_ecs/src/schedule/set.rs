@@ -175,9 +175,9 @@ impl<S: SystemSet> IntoSystemSet<()> for S {
 impl<Marker, F> IntoSystemSet<(IsFunctionSystem, Marker)> for F
 where
     Marker: 'static,
-    F: SystemParamFunction<Marker>,
+    F: SystemParamFunction<'static, Marker>,
 {
-    type Set = SystemTypeSet<FunctionSystem<Marker, F>>;
+    type Set = SystemTypeSet<FunctionSystem<'static, Marker, F>>;
 
     #[inline]
     fn into_system_set(self) -> Self::Set {
@@ -189,9 +189,9 @@ where
 impl<Marker, F> IntoSystemSet<(IsExclusiveFunctionSystem, Marker)> for F
 where
     Marker: 'static,
-    F: ExclusiveSystemParamFunction<Marker>,
+    F: ExclusiveSystemParamFunction<'static, Marker>,
 {
-    type Set = SystemTypeSet<ExclusiveFunctionSystem<Marker, F>>;
+    type Set = SystemTypeSet<ExclusiveFunctionSystem<'static, Marker, F>>;
 
     #[inline]
     fn into_system_set(self) -> Self::Set {

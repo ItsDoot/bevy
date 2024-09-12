@@ -247,10 +247,10 @@ impl Stepping {
     ///
     /// Note: if the system is run multiple times in the [`Schedule`], this
     /// will apply for all instances of the system.
-    pub fn always_run<Marker>(
+    pub fn always_run<Marker: 'static>(
         &mut self,
         schedule: impl ScheduleLabel,
-        system: impl IntoSystem<(), (), Marker>,
+        system: impl IntoSystem<'static, (), (), Marker> + 'static,
     ) -> &mut Self {
         let type_id = system.system_type_id();
         self.updates.push(Update::SetBehavior(
@@ -273,10 +273,10 @@ impl Stepping {
     }
 
     /// Ensure this system never runs when stepping is enabled
-    pub fn never_run<Marker>(
+    pub fn never_run<Marker: 'static>(
         &mut self,
         schedule: impl ScheduleLabel,
-        system: impl IntoSystem<(), (), Marker>,
+        system: impl IntoSystem<'static, (), (), Marker> + 'static,
     ) -> &mut Self {
         let type_id = system.system_type_id();
         self.updates.push(Update::SetBehavior(
@@ -299,10 +299,10 @@ impl Stepping {
     }
 
     /// Add a breakpoint for system
-    pub fn set_breakpoint<Marker>(
+    pub fn set_breakpoint<Marker: 'static>(
         &mut self,
         schedule: impl ScheduleLabel,
-        system: impl IntoSystem<(), (), Marker>,
+        system: impl IntoSystem<'static, (), (), Marker> + 'static,
     ) -> &mut Self {
         let type_id = system.system_type_id();
         self.updates.push(Update::SetBehavior(
@@ -325,10 +325,10 @@ impl Stepping {
     }
 
     /// Clear a breakpoint for the system
-    pub fn clear_breakpoint<Marker>(
+    pub fn clear_breakpoint<Marker: 'static>(
         &mut self,
         schedule: impl ScheduleLabel,
-        system: impl IntoSystem<(), (), Marker>,
+        system: impl IntoSystem<'static, (), (), Marker> + 'static,
     ) -> &mut Self {
         self.clear_system(schedule, system);
 
@@ -346,10 +346,10 @@ impl Stepping {
     }
 
     /// Clear any behavior set for the system
-    pub fn clear_system<Marker>(
+    pub fn clear_system<Marker: 'static>(
         &mut self,
         schedule: impl ScheduleLabel,
-        system: impl IntoSystem<(), (), Marker>,
+        system: impl IntoSystem<'static, (), (), Marker> + 'static,
     ) -> &mut Self {
         let type_id = system.system_type_id();
         self.updates.push(Update::ClearBehavior(

@@ -10,7 +10,7 @@ use crate::{
     system::{BoxedSystem, IntoSystem, System},
 };
 
-fn new_condition<M>(condition: impl Condition<M>) -> BoxedCondition {
+fn new_condition<'s, M: 's>(condition: impl Condition<'s, M> + 's) -> BoxedCondition<'s> {
     let condition_system = IntoSystem::into_system(condition);
     assert!(
         condition_system.is_send(),
@@ -33,16 +33,16 @@ fn ambiguous_with(graph_info: &mut GraphInfo, set: InternedSystemSet) {
     }
 }
 
-impl<Marker, F> IntoSystemConfigs<Marker> for F
+impl<Marker: 'static, F> IntoSystemConfigs<Marker> for F
 where
-    F: IntoSystem<(), (), Marker>,
+    F: IntoSystem<'static, (), (), Marker> + 'static,
 {
     fn into_configs(self) -> SystemConfigs {
         SystemConfigs::new_system(Box::new(IntoSystem::into_system(self)))
     }
 }
 
-impl IntoSystemConfigs<()> for BoxedSystem<(), ()> {
+impl IntoSystemConfigs<()> for BoxedSystem<'static, (), ()> {
     fn into_configs(self) -> SystemConfigs {
         SystemConfigs::new_system(self)
     }
@@ -58,11 +58,11 @@ pub struct NodeConfig<T> {
     pub(crate) node: T,
     /// Hierarchy and dependency metadata for this node
     pub(crate) graph_info: GraphInfo,
-    pub(crate) conditions: Vec<BoxedCondition>,
+    pub(crate) conditions: Vec<BoxedCondition<'static>>,
 }
 
 /// Stores configuration for a single system.
-pub type SystemConfig = NodeConfig<BoxedSystem>;
+pub type SystemConfig = NodeConfig<BoxedSystem<'static>>;
 
 /// A collections of generic [`NodeConfig`]s.
 pub enum NodeConfigs<T> {
@@ -73,17 +73,17 @@ pub enum NodeConfigs<T> {
         /// Configuration for each element of the tuple.
         configs: Vec<NodeConfigs<T>>,
         /// Run conditions applied to everything in the tuple.
-        collective_conditions: Vec<BoxedCondition>,
+        collective_conditions: Vec<BoxedCondition<'static>>,
         /// See [`Chain`] for usage.
         chained: Chain,
     },
 }
 
 /// A collection of [`SystemConfig`].
-pub type SystemConfigs = NodeConfigs<BoxedSystem>;
+pub type SystemConfigs = NodeConfigs<BoxedSystem<'static>>;
 
 impl SystemConfigs {
-    fn new_system(system: BoxedSystem) -> Self {
+    fn new_system(system: BoxedSystem<'static>) -> Self {
         // include system in its default sets
         let sets = system.default_system_sets().into_iter().collect();
         Self::NodeConfig(SystemConfig {
@@ -176,7 +176,10 @@ impl<T> NodeConfigs<T> {
         }
     }
 
-    fn distributive_run_if_inner<M>(&mut self, condition: impl Condition<M> + Clone) {
+    fn distributive_run_if_inner<M: 'static>(
+        &mut self,
+        condition: impl Condition<'static, M> + Clone + 'static,
+    ) {
         match self {
             Self::NodeConfig(config) => {
                 config.conditions.push(new_condition(condition));
@@ -219,7 +222,7 @@ impl<T> NodeConfigs<T> {
     ///
     /// This is useful if you have a run condition whose concrete type is unknown.
     /// Prefer `run_if` for run conditions whose type is known at compile time.
-    pub fn run_if_dyn(&mut self, condition: BoxedCondition) {
+    pub fn run_if_dyn(&mut self, condition: BoxedCondition<'static>) {
         match self {
             Self::NodeConfig(config) => {
                 config.conditions.push(condition);
@@ -375,7 +378,10 @@ where
     /// Use [`run_if`](IntoSystemSetConfigs::run_if) on a [`SystemSet`] if you want to make sure
     /// that either all or none of the systems are run, or you don't want to evaluate the run
     /// condition for each contained system separately.
-    fn distributive_run_if<M>(self, condition: impl Condition<M> + Clone) -> SystemConfigs {
+    fn distributive_run_if<M: 'static>(
+        self,
+        condition: impl Condition<'static, M> + Clone + 'static,
+    ) -> SystemConfigs {
         self.into_configs().distributive_run_if(condition)
     }
 
@@ -409,7 +415,7 @@ where
     ///
     /// Use [`distributive_run_if`](IntoSystemConfigs::distributive_run_if) if you want the
     /// condition to be evaluated for each individual system, right before one is run.
-    fn run_if<M>(self, condition: impl Condition<M>) -> SystemConfigs {
+    fn run_if<M: 'static>(self, condition: impl Condition<'static, M> + 'static) -> SystemConfigs {
         self.into_configs().run_if(condition)
     }
 
@@ -487,12 +493,18 @@ impl IntoSystemConfigs<()> for SystemConfigs {
         self
     }
 
-    fn distributive_run_if<M>(mut self, condition: impl Condition<M> + Clone) -> SystemConfigs {
+    fn distributive_run_if<M: 'static>(
+        mut self,
+        condition: impl Condition<'static, M> + Clone + 'static,
+    ) -> SystemConfigs {
         self.distributive_run_if_inner(condition);
         self
     }
 
-    fn run_if<M>(mut self, condition: impl Condition<M>) -> SystemConfigs {
+    fn run_if<M: 'static>(
+        mut self,
+        condition: impl Condition<'static, M> + 'static,
+    ) -> SystemConfigs {
         self.run_if_dyn(new_condition(condition));
         self
     }
@@ -630,7 +642,10 @@ where
     ///
     /// The `Condition` will be evaluated at most once (per schedule run),
     /// the first time a system in this set(s) prepares to run.
-    fn run_if<M>(self, condition: impl Condition<M>) -> SystemSetConfigs {
+    fn run_if<M: 'static>(
+        self,
+        condition: impl Condition<'static, M> + 'static,
+    ) -> SystemSetConfigs {
         self.into_configs().run_if(condition)
     }
 
@@ -707,7 +722,10 @@ impl IntoSystemSetConfigs for SystemSetConfigs {
         self
     }
 
-    fn run_if<M>(mut self, condition: impl Condition<M>) -> SystemSetConfigs {
+    fn run_if<M: 'static>(
+        mut self,
+        condition: impl Condition<'static, M> + 'static,
+    ) -> SystemSetConfigs {
         self.run_if_dyn(new_condition(condition));
 
         self

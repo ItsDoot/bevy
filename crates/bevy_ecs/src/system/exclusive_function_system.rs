@@ -19,9 +19,9 @@ use std::{borrow::Cow, marker::PhantomData};
 /// [`ExclusiveSystemParam`]s.
 ///
 /// [`ExclusiveFunctionSystem`] must be `.initialized` before they can be run.
-pub struct ExclusiveFunctionSystem<Marker, F>
+pub struct ExclusiveFunctionSystem<'s, Marker, F>
 where
-    F: ExclusiveSystemParamFunction<Marker>,
+    F: ExclusiveSystemParamFunction<'s, Marker>,
 {
     func: F,
     param_state: Option<<F::Param as ExclusiveSystemParam>::State>,
@@ -30,9 +30,9 @@ where
     marker: PhantomData<fn() -> Marker>,
 }
 
-impl<Marker, F> ExclusiveFunctionSystem<Marker, F>
+impl<'s, Marker, F> ExclusiveFunctionSystem<'s, Marker, F>
 where
-    F: ExclusiveSystemParamFunction<Marker>,
+    F: ExclusiveSystemParamFunction<'s, Marker>,
 {
     /// Return this system with a new name.
     ///
@@ -47,12 +47,12 @@ where
 #[doc(hidden)]
 pub struct IsExclusiveFunctionSystem;
 
-impl<Marker, F> IntoSystem<F::In, F::Out, (IsExclusiveFunctionSystem, Marker)> for F
+impl<'s, Marker, F> IntoSystem<'s, F::In, F::Out, (IsExclusiveFunctionSystem, Marker)> for F
 where
     Marker: 'static,
-    F: ExclusiveSystemParamFunction<Marker>,
+    F: ExclusiveSystemParamFunction<'s, Marker>,
 {
-    type System = ExclusiveFunctionSystem<Marker, F>;
+    type System = ExclusiveFunctionSystem<'s, Marker, F>;
     fn into_system(func: Self) -> Self::System {
         ExclusiveFunctionSystem {
             func,
@@ -65,10 +65,10 @@ where
 
 const PARAM_MESSAGE: &str = "System's param_state was not found. Did you forget to initialize this system before running it?";
 
-impl<Marker, F> System for ExclusiveFunctionSystem<Marker, F>
+impl<'s, Marker, F> System<'s> for ExclusiveFunctionSystem<'s, Marker, F>
 where
     Marker: 'static,
-    F: ExclusiveSystemParamFunction<Marker>,
+    F: ExclusiveSystemParamFunction<'s, Marker>,
 {
     type In = F::In;
     type Out = F::Out;
@@ -161,7 +161,10 @@ where
         );
     }
 
-    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
+    fn default_system_sets(&self) -> Vec<InternedSystemSet>
+    where
+        Self: 'static,
+    {
         let set = crate::schedule::SystemTypeSet::<Self>::new();
         vec![set.intern()]
     }
@@ -183,12 +186,12 @@ where
     message = "`{Self}` is not an exclusive system",
     label = "invalid system"
 )]
-pub trait ExclusiveSystemParamFunction<Marker>: Send + Sync + 'static {
+pub trait ExclusiveSystemParamFunction<'s, Marker>: Send + Sync + 'static {
     /// The input type to this system. See [`System::In`].
-    type In;
+    type In: 's;
 
     /// The return type of this system. See [`System::Out`].
-    type Out;
+    type Out: 's;
 
     /// The [`ExclusiveSystemParam`]'s defined by this system's `fn` parameters.
     type Param: ExclusiveSystemParam;
@@ -205,7 +208,7 @@ pub trait ExclusiveSystemParamFunction<Marker>: Send + Sync + 'static {
 macro_rules! impl_exclusive_system_function {
     ($($param: ident),*) => {
         #[allow(non_snake_case)]
-        impl<Out, Func: Send + Sync + 'static, $($param: ExclusiveSystemParam),*> ExclusiveSystemParamFunction<fn($($param,)*) -> Out> for Func
+        impl<'s, Out: 's, Func: Send + Sync + 'static, $($param: ExclusiveSystemParam),*> ExclusiveSystemParamFunction<'s, fn($($param,)*) -> Out> for Func
         where
         for <'a> &'a mut Func:
                 FnMut(&mut World, $($param),*) -> Out +
@@ -233,7 +236,7 @@ macro_rules! impl_exclusive_system_function {
             }
         }
         #[allow(non_snake_case)]
-        impl<Input, Out, Func: Send + Sync + 'static, $($param: ExclusiveSystemParam),*> ExclusiveSystemParamFunction<fn(In<Input>, $($param,)*) -> Out> for Func
+        impl<'s, Input: 's, Out: 's, Func: Send + Sync + 'static, $($param: ExclusiveSystemParam),*> ExclusiveSystemParamFunction<'s, fn(In<Input>, $($param,)*) -> Out> for Func
         where
         for <'a> &'a mut Func:
                 FnMut(In<Input>, &mut World, $($param),*) -> Out +
@@ -273,9 +276,9 @@ mod tests {
 
     #[test]
     fn into_system_type_id_consistency() {
-        fn test<T, In, Out, Marker>(function: T)
+        fn test<T, In: 'static, Out: 'static, Marker: 'static>(function: T)
         where
-            T: IntoSystem<In, Out, Marker> + Copy,
+            T: IntoSystem<'static, In, Out, Marker> + Copy + 'static,
         {
             fn reference_system(_world: &mut World) {}
 

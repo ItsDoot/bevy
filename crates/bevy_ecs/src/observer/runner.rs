@@ -271,7 +271,14 @@ pub struct Observer {
 impl Observer {
     /// Creates a new [`Observer`], which defaults to a "global" observer. This means it will run whenever the event `E` is triggered
     /// for _any_ entity (or no entity).
-    pub fn new<E: Event, B: Bundle, M, I: IntoObserverSystem<E, B, M>>(system: I) -> Self {
+    pub fn new<
+        E: Event,
+        B: Bundle,
+        M: 'static,
+        I: IntoObserverSystem<'static, E, B, M> + 'static,
+    >(
+        system: I,
+    ) -> Self {
         Self {
             system: Box::new(IntoObserverSystem::into_system(system)),
             descriptor: Default::default(),
@@ -324,7 +331,7 @@ impl Component for Observer {
     }
 }
 
-fn observer_system_runner<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
+fn observer_system_runner<'s, E: Event, B: Bundle, S: ObserverSystem<'s, E, B> + 'static>(
     mut world: DeferredWorld,
     observer_trigger: ObserverTrigger,
     ptr: PtrMut,
@@ -393,7 +400,7 @@ fn observer_system_runner<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
 /// The type parameters of this function _must_ match those used to create the [`Observer`].
 /// As such, it is recommended to only use this function within the [`Observer::new`] method to
 /// ensure type parameters match.
-fn hook_on_add<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
+fn hook_on_add<'s, E: Event, B: Bundle, S: ObserverSystem<'s, E, B> + 'static>(
     mut world: DeferredWorld<'_>,
     entity: Entity,
     _: ComponentId,

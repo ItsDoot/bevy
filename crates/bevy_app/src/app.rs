@@ -303,11 +303,16 @@ impl App {
     /// This allows for running systems in a push-based fashion.
     /// Using a [`Schedule`] is still preferred for most cases
     /// due to its better performance and ability to run non-conflicting systems simultaneously.
-    pub fn register_system<I: 'static, O: 'static, M, S: IntoSystem<I, O, M> + 'static>(
+    pub fn register_system<
+        I: 'static,
+        O: 'static,
+        M: 'static,
+        S: IntoSystem<'static, I, O, M> + 'static,
+    >(
         &mut self,
         system: S,
     ) -> SystemId<I, O> {
-        self.main_mut().register_system(system)
+        self.main_mut().register_system::<I, O, M, S>(system)
     }
 
     /// Configures a collection of system sets in the provided schedule, adding any sets that do not exist.
@@ -1020,9 +1025,9 @@ impl App {
     ///     }
     /// });
     /// ```
-    pub fn observe<E: Event, B: Bundle, M>(
+    pub fn observe<E: Event, B: Bundle, M: 'static>(
         &mut self,
-        observer: impl IntoObserverSystem<E, B, M>,
+        observer: impl IntoObserverSystem<'static, E, B, M> + 'static,
     ) -> &mut Self {
         self.world_mut().observe(observer);
         self

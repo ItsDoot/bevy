@@ -24,23 +24,32 @@ use super::IntoSystem;
 /// It's possible to specify explicit execution order between specific systems,
 /// see [`IntoSystemConfigs`](crate::schedule::IntoSystemConfigs).
 #[diagnostic::on_unimplemented(message = "`{Self}` is not a system", label = "invalid system")]
-pub trait System: Send + Sync + 'static {
+pub trait System<'s>: Send + Sync {
     /// The system's input. See [`In`](crate::system::In) for
     /// [`FunctionSystem`](crate::system::FunctionSystem)s.
-    type In;
+    type In: 's;
+
     /// The system's output.
-    type Out;
+    type Out: 's;
+
     /// Returns the system's name.
     fn name(&self) -> Cow<'static, str>;
+
     /// Returns the [`TypeId`] of the underlying system type.
     #[inline]
-    fn type_id(&self) -> TypeId {
+    fn type_id(&self) -> TypeId
+    where
+        Self: 'static,
+    {
         TypeId::of::<Self>()
     }
+
     /// Returns the system's component [`Access`].
     fn component_access(&self) -> &Access<ComponentId>;
+
     /// Returns the system's archetype component [`Access`].
     fn archetype_component_access(&self) -> &Access<ArchetypeComponentId>;
+
     /// Returns true if the system is [`Send`].
     fn is_send(&self) -> bool;
 
@@ -113,7 +122,10 @@ pub trait System: Send + Sync + 'static {
     /// Returns the system's default [system sets](crate::schedule::SystemSet).
     ///
     /// Each system will create a default system set that contains the system.
-    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
+    fn default_system_sets(&self) -> Vec<InternedSystemSet>
+    where
+        Self: 'static,
+    {
         Vec::new()
     }
 
@@ -142,7 +154,7 @@ pub trait System: Send + Sync + 'static {
 ///
 /// This must only be implemented for system types which do not mutate the `World`
 /// when [`System::run_unsafe`] is called.
-pub unsafe trait ReadOnlySystem: System {
+pub unsafe trait ReadOnlySystem<'s>: System<'s> {
     /// Runs this system with the given input in the world.
     ///
     /// Unlike [`System::run`], this can be called with a shared reference to the world,
@@ -158,7 +170,7 @@ pub unsafe trait ReadOnlySystem: System {
 }
 
 /// A convenience type alias for a boxed [`System`] trait object.
-pub type BoxedSystem<In = (), Out = ()> = Box<dyn System<In = In, Out = Out>>;
+pub type BoxedSystem<'s, In = (), Out = ()> = Box<dyn System<'s, In = In, Out = Out>>;
 
 pub(crate) fn check_system_change_tick(last_run: &mut Tick, this_run: Tick, system_name: &str) {
     if last_run.check_tick(this_run) {
@@ -171,7 +183,7 @@ pub(crate) fn check_system_change_tick(last_run: &mut Tick, this_run: Tick, syst
     }
 }
 
-impl<In: 'static, Out: 'static> Debug for dyn System<In = In, Out = Out> {
+impl<'s, In: 's, Out: 's> Debug for dyn System<'s, In = In, Out = Out> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("System")
             .field("name", &self.name())
@@ -276,22 +288,25 @@ impl<In: 'static, Out: 'static> Debug for dyn System<In = In, Out = Out> {
 ///
 /// # assert_eq!(count, 2);
 /// ```
-pub trait RunSystemOnce: Sized {
+pub trait RunSystemOnce<'s>: Sized {
     /// Runs a system and applies its deferred parameters.
-    fn run_system_once<T: IntoSystem<(), Out, Marker>, Out, Marker>(self, system: T) -> Out {
+    fn run_system_once<T: IntoSystem<'s, (), Out, Marker>, Out: 's, Marker: 's>(
+        self,
+        system: T,
+    ) -> Out {
         self.run_system_once_with((), system)
     }
 
     /// Runs a system with given input and applies its deferred parameters.
-    fn run_system_once_with<T: IntoSystem<In, Out, Marker>, In, Out, Marker>(
+    fn run_system_once_with<T: IntoSystem<'s, In, Out, Marker>, In: 's, Out: 's, Marker: 's>(
         self,
         input: In,
         system: T,
     ) -> Out;
 }
 
-impl RunSystemOnce for &mut World {
-    fn run_system_once_with<T: IntoSystem<In, Out, Marker>, In, Out, Marker>(
+impl<'s> RunSystemOnce<'s> for &'s mut World {
+    fn run_system_once_with<T: IntoSystem<'s, In, Out, Marker>, In: 's, Out: 's, Marker: 's>(
         self,
         input: In,
         system: T,

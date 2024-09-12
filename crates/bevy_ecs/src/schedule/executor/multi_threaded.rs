@@ -29,14 +29,14 @@ use super::__rust_begin_short_backtrace;
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
     executor: &'env MultiThreadedExecutor,
-    systems: &'sys [SyncUnsafeCell<BoxedSystem>],
+    systems: &'sys [SyncUnsafeCell<BoxedSystem<'static>>],
     conditions: SyncUnsafeCell<Conditions<'sys>>,
     world_cell: UnsafeWorldCell<'env>,
 }
 
 struct Conditions<'a> {
-    system_conditions: &'a mut [Vec<BoxedCondition>],
-    set_conditions: &'a mut [Vec<BoxedCondition>],
+    system_conditions: &'a mut [Vec<BoxedCondition<'static>>],
+    set_conditions: &'a mut [Vec<BoxedCondition<'static>>],
     sets_with_conditions_of_systems: &'a [FixedBitSet],
     systems_in_sets_with_conditions: &'a [FixedBitSet],
 }

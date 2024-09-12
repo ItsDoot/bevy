@@ -155,9 +155,9 @@ use crate::world::World;
     message = "`{Self}` is not a valid system with input `{In}` and output `{Out}`",
     label = "invalid system"
 )]
-pub trait IntoSystem<In, Out, Marker>: Sized {
+pub trait IntoSystem<'s, In: 's, Out: 's, Marker: 's>: Sized {
     /// The type of [`System`] that this instance converts into.
-    type System: System<In = In, Out = Out>;
+    type System: System<'s, In = In, Out = Out>;
 
     /// Turns this value into its corresponding [`System`].
     fn into_system(this: Self) -> Self::System;
@@ -168,7 +168,7 @@ pub trait IntoSystem<In, Out, Marker>: Sized {
     /// where `T` is the return type of the first system.
     fn pipe<B, Final, MarkerB>(self, system: B) -> PipeSystem<Self::System, B::System>
     where
-        B: IntoSystem<Out, Final, MarkerB>,
+        B: IntoSystem<'s, Out, Final, MarkerB>,
     {
         let system_a = IntoSystem::into_system(self);
         let system_b = IntoSystem::into_system(system);
@@ -195,7 +195,7 @@ pub trait IntoSystem<In, Out, Marker>: Sized {
     ///     # Err(())
     /// }
     /// ```
-    fn map<T, F>(self, f: F) -> AdapterSystem<F, Self::System>
+    fn map<T: 's, F>(self, f: F) -> AdapterSystem<F, Self::System>
     where
         F: Send + Sync + 'static + FnMut(Out) -> T,
     {
@@ -206,13 +206,17 @@ pub trait IntoSystem<In, Out, Marker>: Sized {
 
     /// Get the [`TypeId`] of the [`System`] produced after calling [`into_system`](`IntoSystem::into_system`).
     #[inline]
-    fn system_type_id(&self) -> TypeId {
+    fn system_type_id(&self) -> TypeId
+    where
+        Self: 'static,
+        's: 'static,
+    {
         TypeId::of::<Self::System>()
     }
 }
 
 // All systems implicitly implement IntoSystem.
-impl<T: System> IntoSystem<T::In, T::Out, ()> for T {
+impl<'s, T: System<'s>> IntoSystem<'s, T::In, T::Out, ()> for T {
     type System = T;
     fn into_system(this: Self) -> Self {
         this
@@ -271,8 +275,8 @@ pub struct In<In>(pub In);
 ///
 /// assert_is_system(my_system);
 /// ```
-pub fn assert_is_system<In: 'static, Out: 'static, Marker>(
-    system: impl IntoSystem<In, Out, Marker>,
+pub fn assert_is_system<'s, In: 's, Out: 's, Marker: 's>(
+    system: impl IntoSystem<'s, In, Out, Marker>,
 ) {
     let mut system = IntoSystem::into_system(system);
 
@@ -304,10 +308,10 @@ pub fn assert_is_system<In: 'static, Out: 'static, Marker>(
 ///
 /// assert_is_read_only_system(my_system);
 /// ```
-pub fn assert_is_read_only_system<In: 'static, Out: 'static, Marker, S>(system: S)
+pub fn assert_is_read_only_system<'s, In: 's, Out: 's, Marker: 's, S>(system: S)
 where
-    S: IntoSystem<In, Out, Marker>,
-    S::System: ReadOnlySystem,
+    S: IntoSystem<'s, In, Out, Marker>,
+    S::System: ReadOnlySystem<'s>,
 {
     assert_is_system(system);
 }
@@ -317,7 +321,14 @@ where
 /// This function will panic if the provided system conflict with itself.
 ///
 /// Note: this will run the system on an empty world.
-pub fn assert_system_does_not_conflict<Out, Params, S: IntoSystem<(), Out, Params>>(sys: S) {
+pub fn assert_system_does_not_conflict<
+    's,
+    Out: 's,
+    Marker: 's,
+    S: IntoSystem<'s, (), Out, Marker>,
+>(
+    sys: S,
+) {
     let mut world = World::new();
     let mut system = IntoSystem::into_system(sys);
     system.initialize(&mut world);
@@ -404,7 +415,10 @@ mod tests {
         system.run((), &mut world);
     }
 
-    fn run_system<Marker, S: IntoSystem<(), (), Marker>>(world: &mut World, system: S) {
+    fn run_system<Marker: 'static, S: IntoSystem<'static, (), (), Marker> + 'static>(
+        world: &mut World,
+        system: S,
+    ) {
         let mut schedule = Schedule::default();
         schedule.add_systems(system);
         schedule.run(world);
@@ -848,7 +862,12 @@ mod tests {
         _buffer: Vec<u8>,
     }
 
-    fn test_for_conflicting_resources<Marker, S: IntoSystem<(), (), Marker>>(sys: S) {
+    fn test_for_conflicting_resources<
+        Marker: 'static,
+        S: IntoSystem<'static, (), (), Marker> + 'static,
+    >(
+        sys: S,
+    ) {
         let mut world = World::default();
         world.insert_resource(BufferRes::default());
         world.insert_resource(A);

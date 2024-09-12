@@ -58,9 +58,9 @@ pub struct SystemSchedule {
     /// List of system node ids.
     pub(super) system_ids: Vec<NodeId>,
     /// Indexed by system node id.
-    pub(super) systems: Vec<BoxedSystem>,
+    pub(super) systems: Vec<BoxedSystem<'static>>,
     /// Indexed by system node id.
-    pub(super) system_conditions: Vec<Vec<BoxedCondition>>,
+    pub(super) system_conditions: Vec<Vec<BoxedCondition<'static>>>,
     /// Indexed by system node id.
     /// Number of systems that the system immediately depends on.
     pub(super) system_dependencies: Vec<usize>,
@@ -73,7 +73,7 @@ pub struct SystemSchedule {
     /// List of system set node ids.
     pub(super) set_ids: Vec<NodeId>,
     /// Indexed by system set node id.
-    pub(super) set_conditions: Vec<Vec<BoxedCondition>>,
+    pub(super) set_conditions: Vec<Vec<BoxedCondition<'static>>>,
     /// Indexed by system set node id.
     /// List of systems that are in sets that have conditions.
     ///
@@ -120,7 +120,7 @@ impl SystemSchedule {
 pub fn apply_deferred(world: &mut World) {}
 
 /// Returns `true` if the [`System`](crate::system::System) is an instance of [`apply_deferred`].
-pub(super) fn is_apply_deferred(system: &BoxedSystem) -> bool {
+pub(super) fn is_apply_deferred(system: &BoxedSystem<'static>) -> bool {
     use crate::system::IntoSystem;
     // deref to use `System::type_id` instead of `Any::type_id`
     system.as_ref().type_id() == apply_deferred.system_type_id()

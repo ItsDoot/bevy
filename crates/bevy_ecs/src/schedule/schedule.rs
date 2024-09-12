@@ -486,7 +486,8 @@ impl Schedule {
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (NodeId, &BoxedSystem)> + Sized, ScheduleNotInitialized> {
+    ) -> Result<impl Iterator<Item = (NodeId, &BoxedSystem<'static>)> + Sized, ScheduleNotInitialized>
+    {
         if !self.executor_initialized {
             return Err(ScheduleNotInitialized);
         }
@@ -566,21 +567,21 @@ impl SystemSetNode {
 
 /// A [`BoxedSystem`] with metadata, stored in a [`ScheduleGraph`].
 struct SystemNode {
-    inner: Option<BoxedSystem>,
+    inner: Option<BoxedSystem<'static>>,
 }
 
 impl SystemNode {
-    pub fn new(system: BoxedSystem) -> Self {
+    pub fn new(system: BoxedSystem<'static>) -> Self {
         Self {
             inner: Some(system),
         }
     }
 
-    pub fn get(&self) -> Option<&BoxedSystem> {
+    pub fn get(&self) -> Option<&BoxedSystem<'static>> {
         self.inner.as_ref()
     }
 
-    pub fn get_mut(&mut self) -> Option<&mut BoxedSystem> {
+    pub fn get_mut(&mut self) -> Option<&mut BoxedSystem<'static>> {
         self.inner.as_mut()
     }
 }
@@ -594,11 +595,11 @@ pub struct ScheduleGraph {
     /// List of systems in the schedule
     systems: Vec<SystemNode>,
     /// List of conditions for each system, in the same order as `systems`
-    system_conditions: Vec<Vec<BoxedCondition>>,
+    system_conditions: Vec<Vec<BoxedCondition<'static>>>,
     /// List of system sets in the schedule
     system_sets: Vec<SystemSetNode>,
     /// List of conditions for each system set, in the same order as `system_sets`
-    system_set_conditions: Vec<Vec<BoxedCondition>>,
+    system_set_conditions: Vec<Vec<BoxedCondition<'static>>>,
     /// Map from system set to node id
     system_set_ids: HashMap<InternedSystemSet, NodeId>,
     /// Systems that have not been initialized yet; for system sets, we store the index of the first uninitialized condition
@@ -643,7 +644,7 @@ impl ScheduleGraph {
     }
 
     /// Returns the system at the given [`NodeId`], if it exists.
-    pub fn get_system_at(&self, id: NodeId) -> Option<&dyn System<In = (), Out = ()>> {
+    pub fn get_system_at(&self, id: NodeId) -> Option<&dyn System<'static, In = (), Out = ()>> {
         if !id.is_system() {
             return None;
         }
@@ -656,7 +657,7 @@ impl ScheduleGraph {
     ///
     /// Panics if it doesn't exist.
     #[track_caller]
-    pub fn system_at(&self, id: NodeId) -> &dyn System<In = (), Out = ()> {
+    pub fn system_at(&self, id: NodeId) -> &dyn System<'static, In = (), Out = ()> {
         self.get_system_at(id)
             .ok_or_else(|| format!("system with id {id:?} does not exist in this Schedule"))
             .unwrap()
@@ -683,7 +684,13 @@ impl ScheduleGraph {
     /// Returns an iterator over all systems in this schedule, along with the conditions for each system.
     pub fn systems(
         &self,
-    ) -> impl Iterator<Item = (NodeId, &dyn System<In = (), Out = ()>, &[BoxedCondition])> {
+    ) -> impl Iterator<
+        Item = (
+            NodeId,
+            &dyn System<'static, In = (), Out = ()>,
+            &[BoxedCondition<'static>],
+        ),
+    > {
         self.systems
             .iter()
             .zip(self.system_conditions.iter())
@@ -696,7 +703,9 @@ impl ScheduleGraph {
 
     /// Returns an iterator over all system sets in this schedule, along with the conditions for each
     /// system set.
-    pub fn system_sets(&self) -> impl Iterator<Item = (NodeId, &dyn SystemSet, &[BoxedCondition])> {
+    pub fn system_sets(
+        &self,
+    ) -> impl Iterator<Item = (NodeId, &dyn SystemSet, &[BoxedCondition<'static>])> {
         self.system_set_ids.iter().map(|(_, &node_id)| {
             let set_node = &self.system_sets[node_id.index()];
             let set = &*set_node.inner;
@@ -746,7 +755,7 @@ impl ScheduleGraph {
     fn apply_collective_conditions<T: ProcessNodeConfig>(
         &mut self,
         configs: &mut [NodeConfigs<T>],
-        collective_conditions: Vec<BoxedCondition>,
+        collective_conditions: Vec<BoxedCondition<'static>>,
     ) {
         if !collective_conditions.is_empty() {
             if let [config] = configs {
@@ -1556,7 +1565,7 @@ trait ProcessNodeConfig: Sized {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: NodeConfig<Self>) -> NodeId;
 }
 
-impl ProcessNodeConfig for BoxedSystem {
+impl ProcessNodeConfig for BoxedSystem<'static> {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: NodeConfig<Self>) -> NodeId {
         schedule_graph.add_system_inner(config).unwrap()
     }

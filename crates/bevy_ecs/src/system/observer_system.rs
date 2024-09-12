@@ -10,17 +10,13 @@ use super::IntoSystem;
 /// Implemented for systems that have an [`Observer`] as the first argument.
 ///
 /// [`Observer`]: crate::observer::Observer
-pub trait ObserverSystem<E: 'static, B: Bundle, Out = ()>:
-    System<In = Trigger<'static, E, B>, Out = Out> + Send + 'static
+pub trait ObserverSystem<'s, E: 'static, B: Bundle, Out = ()>:
+    System<'s, In = Trigger<'s, E, B>, Out = Out> + Send
 {
 }
 
-impl<
-        E: 'static,
-        B: Bundle,
-        Out,
-        T: System<In = Trigger<'static, E, B>, Out = Out> + Send + 'static,
-    > ObserverSystem<E, B, Out> for T
+impl<'s, E: 'static, B: Bundle, Out, T: System<'s, In = Trigger<'s, E, B>, Out = Out> + Send>
+    ObserverSystem<'s, E, B, Out> for T
 {
 }
 
@@ -30,25 +26,26 @@ impl<
     label = "the trait `IntoObserverSystem` is not implemented",
     note = "for function `ObserverSystem`s, ensure the first argument is a `Trigger<T>` and any subsequent ones are `SystemParam`"
 )]
-pub trait IntoObserverSystem<E: 'static, B: Bundle, M, Out = ()>: Send + 'static {
+pub trait IntoObserverSystem<'s, E: 'static, B: Bundle, M, Out = ()>: Send {
     /// The type of [`System`] that this instance converts into.
-    type System: ObserverSystem<E, B, Out>;
+    type System: ObserverSystem<'s, E, B, Out>;
 
     /// Turns this value into its corresponding [`System`].
     fn into_system(this: Self) -> Self::System;
 }
 
 impl<
-        S: IntoSystem<Trigger<'static, E, B>, Out, M> + Send + 'static,
-        M,
-        Out,
+        's,
+        S: IntoSystem<'s, Trigger<'s, E, B>, Out, M> + Send,
+        M: 's,
+        Out: 's,
         E: 'static,
         B: Bundle,
-    > IntoObserverSystem<E, B, M, Out> for S
+    > IntoObserverSystem<'s, E, B, M, Out> for S
 where
-    S::System: ObserverSystem<E, B, Out>,
+    S::System: ObserverSystem<'s, E, B, Out>,
 {
-    type System = <S as IntoSystem<Trigger<'static, E, B>, Out, M>>::System;
+    type System = <S as IntoSystem<'s, Trigger<'s, E, B>, Out, M>>::System;
 
     fn into_system(this: Self) -> Self::System {
         IntoSystem::into_system(this)
@@ -58,7 +55,7 @@ where
 macro_rules! impl_system_function {
     ($($param: ident),*) => {
         #[allow(non_snake_case)]
-        impl<E: 'static, B: Bundle, Out, Func: Send + Sync + 'static, $($param: SystemParam),*> SystemParamFunction<fn(Trigger<E, B>, $($param,)*)> for Func
+        impl<'s, E: 'static, B: Bundle, Out, Func: Send + Sync + 'static, $($param: SystemParam),*> SystemParamFunction<'s, fn(Trigger<E, B>, $($param,)*)> for Func
         where
         for <'a> &'a mut Func:
                 FnMut(Trigger<E, B>, $($param),*) -> Out +

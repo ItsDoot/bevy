@@ -43,11 +43,11 @@ use crate::{schedule::InternedSystemSet, world::unsafe_world_cell::UnsafeWorldCe
     message = "`{Self}` can not adapt a system of type `{S}`",
     label = "invalid system adapter"
 )]
-pub trait Adapt<S: System>: Send + Sync + 'static {
+pub trait Adapt<'s, S: System<'s>>: Send + Sync + 'static {
     /// The [input](System::In) type for an [`AdapterSystem`].
-    type In;
+    type In: 's;
     /// The [output](System::Out) type for an [`AdapterSystem`].
-    type Out;
+    type Out: 's;
 
     /// When used in an [`AdapterSystem`], this function customizes how the system
     /// is run and how its inputs/outputs are adapted.
@@ -62,10 +62,10 @@ pub struct AdapterSystem<Func, S> {
     name: Cow<'static, str>,
 }
 
-impl<Func, S> AdapterSystem<Func, S>
+impl<'s, Func, S> AdapterSystem<Func, S>
 where
-    Func: Adapt<S>,
-    S: System,
+    Func: Adapt<'s, S>,
+    S: System<'s>,
 {
     /// Creates a new [`System`] that uses `func` to adapt `system`, via the [`Adapt`] trait.
     pub const fn new(func: Func, system: S, name: Cow<'static, str>) -> Self {
@@ -73,10 +73,10 @@ where
     }
 }
 
-impl<Func, S> System for AdapterSystem<Func, S>
+impl<'s, Func, S> System<'s> for AdapterSystem<Func, S>
 where
-    Func: Adapt<S>,
-    S: System,
+    Func: Adapt<'s, S>,
+    S: System<'s>,
 {
     type In = Func::In;
     type Out = Func::Out;
@@ -145,7 +145,10 @@ where
         self.system.check_change_tick(change_tick);
     }
 
-    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
+    fn default_system_sets(&self) -> Vec<InternedSystemSet>
+    where
+        Self: 'static,
+    {
         self.system.default_system_sets()
     }
 
@@ -159,16 +162,16 @@ where
 }
 
 // SAFETY: The inner system is read-only.
-unsafe impl<Func, S> ReadOnlySystem for AdapterSystem<Func, S>
+unsafe impl<'s, Func, S> ReadOnlySystem<'s> for AdapterSystem<Func, S>
 where
-    Func: Adapt<S>,
-    S: ReadOnlySystem,
+    Func: Adapt<'s, S>,
+    S: ReadOnlySystem<'s>,
 {
 }
 
-impl<F, S, Out> Adapt<S> for F
+impl<'s, F, S, Out: 's> Adapt<'s, S> for F
 where
-    S: System,
+    S: System<'s>,
     F: Send + Sync + 'static + FnMut(S::Out) -> Out,
 {
     type In = S::In;

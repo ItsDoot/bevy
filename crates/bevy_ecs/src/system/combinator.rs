@@ -86,12 +86,12 @@ use super::{ReadOnlySystem, System};
     label = "invalid system combination",
     note = "the inputs and outputs of `{A}` and `{B}` are not compatible with this combiner"
 )]
-pub trait Combine<A: System, B: System> {
+pub trait Combine<'s, A: System<'s>, B: System<'s>> {
     /// The [input](System::In) type for a [`CombinatorSystem`].
-    type In;
+    type In: 's;
 
     /// The [output](System::Out) type for a [`CombinatorSystem`].
-    type Out;
+    type Out: 's;
 
     /// When used in a [`CombinatorSystem`], this function customizes how
     /// the two composite systems are invoked and their outputs are combined.
@@ -132,11 +132,11 @@ impl<Func, A, B> CombinatorSystem<Func, A, B> {
     }
 }
 
-impl<A, B, Func> System for CombinatorSystem<Func, A, B>
+impl<'s, A, B, Func> System<'s> for CombinatorSystem<Func, A, B>
 where
-    Func: Combine<A, B> + 'static,
-    A: System,
-    B: System,
+    Func: Combine<'s, A, B> + 'static,
+    A: System<'s>,
+    B: System<'s>,
 {
     type In = Func::In;
     type Out = Func::Out;
@@ -226,7 +226,10 @@ where
         self.b.check_change_tick(change_tick);
     }
 
-    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
+    fn default_system_sets(&self) -> Vec<InternedSystemSet>
+    where
+        Self: 'static,
+    {
         let mut default_sets = self.a.default_system_sets();
         default_sets.append(&mut self.b.default_system_sets());
         default_sets
@@ -243,11 +246,11 @@ where
 }
 
 /// SAFETY: Both systems are read-only, so any system created by combining them will only read from the world.
-unsafe impl<A, B, Func> ReadOnlySystem for CombinatorSystem<Func, A, B>
+unsafe impl<'s, A, B, Func> ReadOnlySystem<'s> for CombinatorSystem<Func, A, B>
 where
-    Func: Combine<A, B> + 'static,
-    A: ReadOnlySystem,
-    B: ReadOnlySystem,
+    Func: Combine<'s, A, B> + 'static,
+    A: ReadOnlySystem<'s>,
+    B: ReadOnlySystem<'s>,
 {
 }
 
@@ -306,10 +309,10 @@ pub type PipeSystem<SystemA, SystemB> = CombinatorSystem<Pipe, SystemA, SystemB>
 #[doc(hidden)]
 pub struct Pipe;
 
-impl<A, B> Combine<A, B> for Pipe
+impl<'s, A, B> Combine<'s, A, B> for Pipe
 where
-    A: System,
-    B: System<In = A::Out>,
+    A: System<'s>,
+    B: System<'s, In = A::Out>,
 {
     type In = A::In;
     type Out = B::Out;

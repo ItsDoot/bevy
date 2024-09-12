@@ -1509,9 +1509,9 @@ impl<'w> EntityWorldMut<'w> {
 
     /// Creates an [`Observer`] listening for events of type `E` targeting this entity.
     /// In order to trigger the callback the entity must also match the query when the event is fired.
-    pub fn observe<E: Event, B: Bundle, M>(
+    pub fn observe<E: Event, B: Bundle, M: 'static>(
         &mut self,
-        observer: impl IntoObserverSystem<E, B, M>,
+        observer: impl IntoObserverSystem<'static, E, B, M> + 'static,
     ) -> &mut Self {
         self.world
             .spawn(Observer::new(observer).with_entity(self.entity));
