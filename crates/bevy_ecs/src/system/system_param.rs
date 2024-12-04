@@ -1051,7 +1051,6 @@ unsafe impl SystemParam for &'_ World {
         system_meta.archetype_component_access.extend(&access);
 
         let mut filtered_access = FilteredAccess::default();
-
         filtered_access.read_all();
         if !system_meta
             .component_access_set
@@ -1097,7 +1096,6 @@ unsafe impl<'w> SystemParam for DeferredWorld<'w> {
         system_meta.archetype_component_access.extend(&access);
 
         let mut filtered_access = FilteredAccess::default();
-
         filtered_access.read_all();
         filtered_access.write_all();
         if !system_meta
@@ -1108,7 +1106,9 @@ unsafe impl<'w> SystemParam for DeferredWorld<'w> {
             panic!("{}", MUT_DEFERRED_WORLD_ERROR);
         }
         system_meta.component_access_set.add(filtered_access);
+
         system_meta.set_has_deferred();
+        system_meta.set_non_send();
     }
 
     unsafe fn get_param<'world, 'state>(
@@ -1147,7 +1147,6 @@ unsafe impl SystemParam for &mut World {
         system_meta.archetype_component_access.extend(&access);
 
         let mut filtered_access = FilteredAccess::default();
-
         filtered_access.read_all();
         filtered_access.write_all();
         if !system_meta
@@ -1158,7 +1157,9 @@ unsafe impl SystemParam for &mut World {
             panic!("{}", MUT_WORLD_ERROR);
         }
         system_meta.component_access_set.add(filtered_access);
+
         system_meta.set_has_deferred();
+        system_meta.set_non_send();
     }
 
     unsafe fn get_param<'world, 'state>(
