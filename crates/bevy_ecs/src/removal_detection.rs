@@ -7,7 +7,7 @@ use crate::{
     event::{Event, EventCursor, EventId, EventIterator, EventIteratorWithId, Events},
     prelude::Local,
     storage::SparseSet,
-    system::{ReadOnlySystemParam, SystemMeta, SystemParam},
+    system::{ReadOnlySystemParam, SystemInput, SystemMeta, SystemParam},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
@@ -249,10 +249,10 @@ impl<'w, 's, T: Component> RemovedComponents<'w, 's, T> {
 }
 
 // SAFETY: Only reads World removed component events
-unsafe impl<'a> ReadOnlySystemParam for &'a RemovedComponentEvents {}
+unsafe impl<I: SystemInput> ReadOnlySystemParam<I> for &'_ RemovedComponentEvents {}
 
 // SAFETY: no component value access.
-unsafe impl<'a> SystemParam for &'a RemovedComponentEvents {
+unsafe impl<I: SystemInput> SystemParam<I> for &'_ RemovedComponentEvents {
     type State = ();
     type Item<'w, 's> = &'w RemovedComponentEvents;
 
@@ -264,6 +264,7 @@ unsafe impl<'a> SystemParam for &'a RemovedComponentEvents {
         _system_meta: &SystemMeta,
         world: UnsafeWorldCell<'w>,
         _change_tick: Tick,
+        _input: &I::Inner<'_>,
     ) -> Self::Item<'w, 's> {
         world.removed_components()
     }

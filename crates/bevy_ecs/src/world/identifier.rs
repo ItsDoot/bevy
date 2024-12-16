@@ -1,7 +1,7 @@
 use crate::{
     component::Tick,
     storage::SparseSetIndex,
-    system::{ExclusiveSystemParam, ReadOnlySystemParam, SystemMeta, SystemParam},
+    system::{ExclusiveSystemParam, ReadOnlySystemParam, SystemInput, SystemMeta, SystemParam},
     world::{FromWorld, World},
 };
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -45,10 +45,10 @@ impl FromWorld for WorldId {
 }
 
 // SAFETY: No world data is accessed.
-unsafe impl ReadOnlySystemParam for WorldId {}
+unsafe impl<I: SystemInput> ReadOnlySystemParam<I> for WorldId {}
 
 // SAFETY: No world data is accessed.
-unsafe impl SystemParam for WorldId {
+unsafe impl<I: SystemInput> SystemParam<I> for WorldId {
     type State = ();
 
     type Item<'world, 'state> = WorldId;
@@ -61,6 +61,7 @@ unsafe impl SystemParam for WorldId {
         _: &SystemMeta,
         world: UnsafeWorldCell<'world>,
         _: Tick,
+        _: &I::Inner<'_>,
     ) -> Self::Item<'world, 'state> {
         world.id()
     }

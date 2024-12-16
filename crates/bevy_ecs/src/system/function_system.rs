@@ -18,7 +18,7 @@ use variadics_please::all_tuples;
 #[cfg(feature = "trace")]
 use bevy_utils::tracing::{info_span, Span};
 
-use super::{In, IntoSystem, ReadOnlySystem, SystemParamBuilder};
+use super::{IntoSystem, ReadOnlySystem, SystemParamBuilder};
 
 /// The metadata of a [`System`].
 #[derive(Clone)]
@@ -130,11 +130,8 @@ impl SystemMeta {
 
     /// Emits a warning about inaccessible system param if policy allows it.
     #[inline]
-    pub fn try_warn_param<P>(&self)
-    where
-        P: SystemParam,
-    {
-        self.param_warn_policy.try_warn::<P>(&self.name);
+    pub fn try_warn_param<P: SystemParam<I>, I: SystemInput>(&self) {
+        self.param_warn_policy.try_warn::<P, I>(&self.name);
     }
 
     /// Archetype component access that is used to determine which systems can run in parallel with each other
@@ -205,10 +202,7 @@ impl ParamWarnPolicy {
 
     /// Emits a warning about inaccessible system param if policy allows it.
     #[inline]
-    fn try_warn<P>(&self, name: &str)
-    where
-        P: SystemParam,
-    {
+    fn try_warn<P: SystemParam<I>, I: SystemInput>(&self, name: &str) {
         if matches!(self, Self::Never) {
             return;
         }
@@ -342,7 +336,7 @@ where
 ///     }
 /// });
 /// ```
-pub struct SystemState<Param: SystemParam + 'static> {
+pub struct SystemState<Param: SystemParam<I> + 'static, I: SystemInput + 'static = ()> {
     meta: SystemMeta,
     param_state: Param::State,
     world_id: WorldId,
@@ -357,14 +351,14 @@ pub struct SystemState<Param: SystemParam + 'static> {
 macro_rules! impl_build_system {
     ($(#[$meta:meta])* $($param: ident),*) => {
         $(#[$meta])*
-        impl<$($param: SystemParam),*> SystemState<($($param,)*)> {
+        impl<$($param: SystemParam<()>),*> SystemState<($($param,)*)> {
             /// Create a [`FunctionSystem`] from a [`SystemState`].
             /// This method signature allows type inference of closure parameters for a system with no input.
             /// You can use [`SystemState::build_system_with_input()`] if you have input, or [`SystemState::build_any_system()`] if you don't need type inference.
             pub fn build_system<
                 Out: 'static,
                 Marker,
-                F: FnMut($(SystemParamItem<$param>),*) -> Out
+                F: FnMut($(SystemParamItem<$param, ()>),*) -> Out
                     + SystemParamFunction<Marker, Param = ($($param,)*), In = (), Out = Out>
             >
             (
@@ -374,16 +368,18 @@ macro_rules! impl_build_system {
             {
                 self.build_any_system(func)
             }
+        }
 
+        $(#[$meta])*
+        impl<I: SystemInput, $($param: SystemParam<I>,)*> SystemState<($($param,)*), I> {
             /// Create a [`FunctionSystem`] from a [`SystemState`].
             /// This method signature allows type inference of closure parameters for a system with input.
             /// You can use [`SystemState::build_system()`] if you have no input, or [`SystemState::build_any_system()`] if you don't need type inference.
             pub fn build_system_with_input<
-                Input: SystemInput,
                 Out: 'static,
                 Marker,
-                F: FnMut(In<Input>, $(SystemParamItem<$param>),*) -> Out
-                    + SystemParamFunction<Marker, Param = ($($param,)*), In = Input, Out = Out>,
+                F: FnMut(I, $(SystemParamItem<$param, I>),*) -> Out
+                    + SystemParamFunction<Marker, Param = ($($param,)*), In = I, Out = Out>,
             >(
                 self,
                 func: F,
@@ -402,7 +398,7 @@ all_tuples!(
     P
 );
 
-impl<Param: SystemParam> SystemState<Param> {
+impl<Param: SystemParam<I>, I: SystemInput> SystemState<Param, I> {
     /// Creates a new [`SystemState`] with default state.
     ///
     /// ## Note
@@ -423,7 +419,10 @@ impl<Param: SystemParam> SystemState<Param> {
     }
 
     /// Create a [`SystemState`] from a [`SystemParamBuilder`]
-    pub(crate) fn from_builder(world: &mut World, builder: impl SystemParamBuilder<Param>) -> Self {
+    pub(crate) fn from_builder(
+        world: &mut World,
+        builder: impl SystemParamBuilder<Param, I>,
+    ) -> Self {
         let mut meta = SystemMeta::new::<Param>();
         meta.last_run = world.change_tick().relative_to(Tick::MAX);
         let param_state = builder.build(world, &mut meta);
@@ -438,7 +437,7 @@ impl<Param: SystemParam> SystemState<Param> {
     /// Create a [`FunctionSystem`] from a [`SystemState`].
     /// This method signature allows any system function, but the compiler will not perform type inference on closure parameters.
     /// You can use [`SystemState::build_system()`] or [`SystemState::build_system_with_input()`] to get type inference on parameters.
-    pub fn build_any_system<Marker, F: SystemParamFunction<Marker, Param = Param>>(
+    pub fn build_any_system<Marker, F: SystemParamFunction<Marker, Param = Param, In = I>>(
         self,
         func: F,
     ) -> FunctionSystem<Marker, F> {
@@ -447,6 +446,7 @@ impl<Param: SystemParam> SystemState<Param> {
             state: Some(FunctionSystemState {
                 param: self.param_state,
                 world_id: self.world_id,
+                _input: PhantomData,
             }),
             system_meta: self.meta,
             archetype_generation: self.archetype_generation,
@@ -458,28 +458,6 @@ impl<Param: SystemParam> SystemState<Param> {
     #[inline]
     pub fn meta(&self) -> &SystemMeta {
         &self.meta
-    }
-
-    /// Retrieve the [`SystemParam`] values. This can only be called when all parameters are read-only.
-    #[inline]
-    pub fn get<'w, 's>(&'s mut self, world: &'w World) -> SystemParamItem<'w, 's, Param>
-    where
-        Param: ReadOnlySystemParam,
-    {
-        self.validate_world(world.id());
-        self.update_archetypes(world);
-        // SAFETY: Param is read-only and doesn't allow mutable access to World.
-        // It also matches the World this SystemState was created with.
-        unsafe { self.get_unchecked_manual(world.as_unsafe_world_cell_readonly()) }
-    }
-
-    /// Retrieve the mutable [`SystemParam`] values.
-    #[inline]
-    pub fn get_mut<'w, 's>(&'s mut self, world: &'w mut World) -> SystemParamItem<'w, 's, Param> {
-        self.validate_world(world.id());
-        self.update_archetypes(world);
-        // SAFETY: World is uniquely borrowed and matches the World this SystemState was created with.
-        unsafe { self.get_unchecked_manual(world.as_unsafe_world_cell()) }
     }
 
     /// Applies all state queued up for [`SystemParam`] values. For example, this will apply commands queued up
@@ -561,6 +539,36 @@ impl<Param: SystemParam> SystemState<Param> {
     }
 
     /// Retrieve the [`SystemParam`] values. This can only be called when all parameters are read-only.
+    #[inline]
+    pub fn get_with<'w, 's>(
+        &'s mut self,
+        world: &'w World,
+        input: &I::Inner<'_>,
+    ) -> SystemParamItem<'w, 's, Param, I>
+    where
+        Param: ReadOnlySystemParam<I>,
+    {
+        self.validate_world(world.id());
+        self.update_archetypes(world);
+        // SAFETY: Param is read-only and doesn't allow mutable access to World.
+        // It also matches the World this SystemState was created with.
+        unsafe { self.get_unchecked_manual_with(world.as_unsafe_world_cell_readonly(), input) }
+    }
+
+    /// Retrieve the mutable [`SystemParam`] values.
+    #[inline]
+    pub fn get_mut_with<'w, 's>(
+        &'s mut self,
+        world: &'w mut World,
+        input: &I::Inner<'_>,
+    ) -> SystemParamItem<'w, 's, Param, I> {
+        self.validate_world(world.id());
+        self.update_archetypes(world);
+        // SAFETY: World is uniquely borrowed and matches the World this SystemState was created with.
+        unsafe { self.get_unchecked_manual_with(world.as_unsafe_world_cell(), input) }
+    }
+
+    /// Retrieve the [`SystemParam`] values. This can only be called when all parameters are read-only.
     /// This will not update the state's view of the world's archetypes automatically nor increment the
     /// world's change tick.
     ///
@@ -569,15 +577,110 @@ impl<Param: SystemParam> SystemState<Param> {
     ///
     /// Users should strongly prefer to use [`SystemState::get`] over this function.
     #[inline]
-    pub fn get_manual<'w, 's>(&'s mut self, world: &'w World) -> SystemParamItem<'w, 's, Param>
+    pub fn get_manual_with<'w, 's>(
+        &'s mut self,
+        world: &'w World,
+        input: &I::Inner<'_>,
+    ) -> SystemParamItem<'w, 's, Param, I>
     where
-        Param: ReadOnlySystemParam,
+        Param: ReadOnlySystemParam<I>,
     {
         self.validate_world(world.id());
         let change_tick = world.read_change_tick();
         // SAFETY: Param is read-only and doesn't allow mutable access to World.
         // It also matches the World this SystemState was created with.
-        unsafe { self.fetch(world.as_unsafe_world_cell_readonly(), change_tick) }
+        unsafe { self.fetch_with(world.as_unsafe_world_cell_readonly(), change_tick, input) }
+    }
+
+    /// Retrieve the mutable [`SystemParam`] values.  This will not update the state's view of the world's archetypes
+    /// automatically nor increment the world's change tick.
+    ///
+    /// For this to return accurate results, ensure [`SystemState::update_archetypes`] is called before this
+    /// function.
+    ///
+    /// Users should strongly prefer to use [`SystemState::get_mut`] over this function.
+    #[inline]
+    pub fn get_manual_mut_with<'w, 's>(
+        &'s mut self,
+        world: &'w mut World,
+        input: &I::Inner<'_>,
+    ) -> SystemParamItem<'w, 's, Param, I> {
+        self.validate_world(world.id());
+        let change_tick = world.change_tick();
+        // SAFETY: World is uniquely borrowed and matches the World this SystemState was created with.
+        unsafe { self.fetch_with(world.as_unsafe_world_cell(), change_tick, input) }
+    }
+
+    /// Retrieve the [`SystemParam`] values. This will not update archetypes automatically.
+    ///
+    /// # Safety
+    /// This call might access any of the input parameters in a way that violates Rust's mutability rules. Make sure the data
+    /// access is safe in the context of global [`World`] access. The passed-in [`World`] _must_ be the [`World`] the [`SystemState`] was
+    /// created with.
+    #[inline]
+    pub unsafe fn get_unchecked_manual_with<'w, 's>(
+        &'s mut self,
+        world: UnsafeWorldCell<'w>,
+        input: &I::Inner<'_>,
+    ) -> SystemParamItem<'w, 's, Param, I> {
+        let change_tick = world.increment_change_tick();
+        // SAFETY: The invariants are uphold by the caller.
+        unsafe { self.fetch_with(world, change_tick, input) }
+    }
+
+    /// # Safety
+    /// This call might access any of the input parameters in a way that violates Rust's mutability rules. Make sure the data
+    /// access is safe in the context of global [`World`] access. The passed-in [`World`] _must_ be the [`World`] the [`SystemState`] was
+    /// created with.
+    #[inline]
+    unsafe fn fetch_with<'w, 's>(
+        &'s mut self,
+        world: UnsafeWorldCell<'w>,
+        change_tick: Tick,
+        input: &I::Inner<'_>,
+    ) -> SystemParamItem<'w, 's, Param, I> {
+        // SAFETY: The invariants are uphold by the caller.
+        let param = unsafe {
+            Param::get_param(&mut self.param_state, &self.meta, world, change_tick, input)
+        };
+        self.meta.last_run = change_tick;
+        param
+    }
+}
+
+impl<Param: SystemParam<()>> SystemState<Param> {
+    /// Retrieve the [`SystemParam`] values. This can only be called when all parameters are read-only.
+    #[inline]
+    pub fn get<'w, 's>(&'s mut self, world: &'w World) -> SystemParamItem<'w, 's, Param, ()>
+    where
+        Param: ReadOnlySystemParam<()>,
+    {
+        self.get_with(world, &())
+    }
+
+    /// Retrieve the mutable [`SystemParam`] values.
+    #[inline]
+    pub fn get_mut<'w, 's>(
+        &'s mut self,
+        world: &'w mut World,
+    ) -> SystemParamItem<'w, 's, Param, ()> {
+        self.get_mut_with(world, &())
+    }
+
+    /// Retrieve the [`SystemParam`] values. This can only be called when all parameters are read-only.
+    /// This will not update the state's view of the world's archetypes automatically nor increment the
+    /// world's change tick.
+    ///
+    /// For this to return accurate results, ensure [`SystemState::update_archetypes`] is called before this
+    /// function.
+    ///
+    /// Users should strongly prefer to use [`SystemState::get`] over this function.
+    #[inline]
+    pub fn get_manual<'w, 's>(&'s mut self, world: &'w World) -> SystemParamItem<'w, 's, Param, ()>
+    where
+        Param: ReadOnlySystemParam<()>,
+    {
+        self.get_manual_with(world, &())
     }
 
     /// Retrieve the mutable [`SystemParam`] values.  This will not update the state's view of the world's archetypes
@@ -591,11 +694,8 @@ impl<Param: SystemParam> SystemState<Param> {
     pub fn get_manual_mut<'w, 's>(
         &'s mut self,
         world: &'w mut World,
-    ) -> SystemParamItem<'w, 's, Param> {
-        self.validate_world(world.id());
-        let change_tick = world.change_tick();
-        // SAFETY: World is uniquely borrowed and matches the World this SystemState was created with.
-        unsafe { self.fetch(world.as_unsafe_world_cell(), change_tick) }
+    ) -> SystemParamItem<'w, 's, Param, ()> {
+        self.get_manual_mut_with(world, &())
     }
 
     /// Retrieve the [`SystemParam`] values. This will not update archetypes automatically.
@@ -608,31 +708,12 @@ impl<Param: SystemParam> SystemState<Param> {
     pub unsafe fn get_unchecked_manual<'w, 's>(
         &'s mut self,
         world: UnsafeWorldCell<'w>,
-    ) -> SystemParamItem<'w, 's, Param> {
-        let change_tick = world.increment_change_tick();
-        // SAFETY: The invariants are uphold by the caller.
-        unsafe { self.fetch(world, change_tick) }
-    }
-
-    /// # Safety
-    /// This call might access any of the input parameters in a way that violates Rust's mutability rules. Make sure the data
-    /// access is safe in the context of global [`World`] access. The passed-in [`World`] _must_ be the [`World`] the [`SystemState`] was
-    /// created with.
-    #[inline]
-    unsafe fn fetch<'w, 's>(
-        &'s mut self,
-        world: UnsafeWorldCell<'w>,
-        change_tick: Tick,
-    ) -> SystemParamItem<'w, 's, Param> {
-        // SAFETY: The invariants are uphold by the caller.
-        let param =
-            unsafe { Param::get_param(&mut self.param_state, &self.meta, world, change_tick) };
-        self.meta.last_run = change_tick;
-        param
+    ) -> SystemParamItem<'w, 's, Param, ()> {
+        self.get_unchecked_manual_with(world, &())
     }
 }
 
-impl<Param: SystemParam> FromWorld for SystemState<Param> {
+impl<Param: SystemParam<I>, I: SystemInput> FromWorld for SystemState<Param, I> {
     fn from_world(world: &mut World) -> Self {
         Self::new(world)
     }
@@ -653,7 +734,7 @@ where
     F: SystemParamFunction<Marker>,
 {
     func: F,
-    state: Option<FunctionSystemState<F::Param>>,
+    state: Option<FunctionSystemState<F::Param, F::In>>,
     system_meta: SystemMeta,
     archetype_generation: ArchetypeGeneration,
     // NOTE: PhantomData<fn()-> T> gives this safe Send/Sync impls
@@ -663,13 +744,14 @@ where
 /// The state of a [`FunctionSystem`], which must be initialized with
 /// [`System::initialize`] before the system can be run. A panic will occur if
 /// the system is run without being initialized.
-struct FunctionSystemState<P: SystemParam> {
+struct FunctionSystemState<P: SystemParam<I>, I: SystemInput> {
     /// The cached state of the system's [`SystemParam`]s.
     param: P::State,
     /// The id of the [`World`] this system was initialized with. If the world
     /// passed to [`System::update_archetype_component_access`] does not match
     /// this id, a panic will occur.
     world_id: WorldId,
+    _input: PhantomData<fn(I)>,
 }
 
 impl<Marker, F> FunctionSystem<Marker, F>
@@ -788,8 +870,9 @@ where
         //   if the world does not match.
         // - All world accesses used by `F::Param` have been registered, so the caller
         //   will ensure that there are no data access conflicts.
-        let params =
-            unsafe { F::Param::get_param(param_state, &self.system_meta, world, change_tick) };
+        let params = unsafe {
+            F::Param::get_param(param_state, &self.system_meta, world, change_tick, &input)
+        };
         let out = self.func.run(input, params);
         self.system_meta.last_run = change_tick;
         out
@@ -834,6 +917,7 @@ where
             self.state = Some(FunctionSystemState {
                 param: F::Param::init_state(world, &mut self.system_meta),
                 world_id: world.id(),
+                _input: PhantomData,
             });
         }
         self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
@@ -881,7 +965,7 @@ unsafe impl<Marker, F> ReadOnlySystem for FunctionSystem<Marker, F>
 where
     Marker: 'static,
     F: SystemParamFunction<Marker>,
-    F::Param: ReadOnlySystemParam,
+    F::Param: ReadOnlySystemParam<F::In>,
 {
 }
 
@@ -957,13 +1041,13 @@ pub trait SystemParamFunction<Marker>: Send + Sync + 'static {
     type Out;
 
     /// The [`SystemParam`]/s used by this system to access the [`World`].
-    type Param: SystemParam;
+    type Param: SystemParam<Self::In>;
 
     /// Executes this system once. See [`System::run`] or [`System::run_unsafe`].
     fn run(
         &mut self,
         input: <Self::In as SystemInput>::Inner<'_>,
-        param_value: SystemParamItem<Self::Param>,
+        param_value: SystemParamItem<Self::Param, Self::In>,
     ) -> Self::Out;
 }
 
@@ -974,19 +1058,19 @@ pub struct HasSystemInput;
 macro_rules! impl_system_function {
     ($($param: ident),*) => {
         #[allow(non_snake_case)]
-        impl<Out, Func, $($param: SystemParam),*> SystemParamFunction<fn($($param,)*) -> Out> for Func
+        impl<Out, Func, $($param: SystemParam<()>),*> SystemParamFunction<fn($($param,)*) -> Out> for Func
         where
             Func: Send + Sync + 'static,
             for <'a> &'a mut Func:
                 FnMut($($param),*) -> Out +
-                FnMut($(SystemParamItem<$param>),*) -> Out,
+                FnMut($(SystemParamItem<$param, ()>),*) -> Out,
             Out: 'static
         {
             type In = ();
             type Out = Out;
             type Param = ($($param,)*);
             #[inline]
-            fn run(&mut self, _input: (), param_value: SystemParamItem< ($($param,)*)>) -> Out {
+            fn run(&mut self, _input: (), param_value: SystemParamItem<($($param,)*), ()>) -> Out {
                 // Yes, this is strange, but `rustc` fails to compile this impl
                 // without using this function. It fails to recognize that `func`
                 // is a function, potentially because of the multiple impls of `FnMut`
@@ -1003,12 +1087,12 @@ macro_rules! impl_system_function {
         }
 
         #[allow(non_snake_case)]
-        impl<In, Out, Func, $($param: SystemParam),*> SystemParamFunction<(HasSystemInput, fn(In, $($param,)*) -> Out)> for Func
+        impl<In, Out, Func, $($param: SystemParam<In>),*> SystemParamFunction<(HasSystemInput, fn(In, $($param,)*) -> Out)> for Func
         where
             Func: Send + Sync + 'static,
             for <'a> &'a mut Func:
                 FnMut(In, $($param),*) -> Out +
-                FnMut(In::Param<'_>, $(SystemParamItem<$param>),*) -> Out,
+                FnMut(In::Param<'_>, $(SystemParamItem<$param, In>),*) -> Out,
             In: SystemInput + 'static,
             Out: 'static
         {
@@ -1016,7 +1100,7 @@ macro_rules! impl_system_function {
             type Out = Out;
             type Param = ($($param,)*);
             #[inline]
-            fn run(&mut self, input: In::Inner<'_>, param_value: SystemParamItem< ($($param,)*)>) -> Out {
+            fn run(&mut self, input: In::Inner<'_>, param_value: SystemParamItem<($($param,)*), In>) -> Out {
                 #[allow(clippy::too_many_arguments)]
                 fn call_inner<In: SystemInput, Out, $($param,)*>(
                     mut f: impl FnMut(In::Param<'_>, $($param,)*)->Out,

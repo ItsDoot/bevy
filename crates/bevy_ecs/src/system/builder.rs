@@ -5,14 +5,15 @@ use crate::{
     prelude::QueryBuilder,
     query::{QueryData, QueryFilter, QueryState},
     system::{
-        DynSystemParam, DynSystemParamState, Local, ParamSet, Query, SystemMeta, SystemParam,
+        DynSystemParam, DynSystemParamState, Local, ParamSet, Query, SystemInput, SystemMeta,
+        SystemParam,
     },
     world::{
         FilteredResources, FilteredResourcesBuilder, FilteredResourcesMut,
         FilteredResourcesMutBuilder, FromWorld, World,
     },
 };
-use core::fmt::Debug;
+use core::{fmt::Debug, marker::PhantomData};
 
 use super::{init_query_param, Res, ResMut, Resource, SystemState};
 
@@ -110,14 +111,14 @@ use super::{init_query_param, Res, ResMut, Resource, SystemState};
 /// Note that this depends on the implementation of [`SystemParam::get_param`],
 /// so if `Self` is not a local type then you must call [`SystemParam::init_state`]
 /// or another [`SystemParamBuilder::build`]
-pub unsafe trait SystemParamBuilder<P: SystemParam>: Sized {
+pub unsafe trait SystemParamBuilder<P: SystemParam<I>, I: SystemInput>: Sized {
     /// Registers any [`World`] access used by this [`SystemParam`]
     /// and creates a new instance of this param's [`State`](SystemParam::State).
     fn build(self, world: &mut World, meta: &mut SystemMeta) -> P::State;
 
     /// Create a [`SystemState`] from a [`SystemParamBuilder`].
     /// To create a system, call [`SystemState::build_system`] on the result.
-    fn build_state(self, world: &mut World) -> SystemState<P> {
+    fn build_state(self, world: &mut World) -> SystemState<P, I> {
         SystemState::from_builder(world, self)
     }
 }
@@ -162,52 +163,52 @@ pub unsafe trait SystemParamBuilder<P: SystemParam>: Sized {
 ///     .build_system(my_system);
 /// ```
 #[derive(Default, Debug, Copy, Clone)]
-pub struct ParamBuilder;
+pub struct ParamBuilder<I: SystemInput = ()>(PhantomData<fn(I)>);
 
 // SAFETY: Calls `SystemParam::init_state`
-unsafe impl<P: SystemParam> SystemParamBuilder<P> for ParamBuilder {
+unsafe impl<P: SystemParam<I>, I: SystemInput> SystemParamBuilder<P, I> for ParamBuilder<I> {
     fn build(self, world: &mut World, meta: &mut SystemMeta) -> P::State {
         P::init_state(world, meta)
     }
 }
 
-impl ParamBuilder {
+impl<I: SystemInput> ParamBuilder<I> {
     /// Creates a [`SystemParamBuilder`] for any [`SystemParam`] that uses its default initialization.
-    pub fn of<T: SystemParam>() -> impl SystemParamBuilder<T> {
-        Self
+    pub fn of<T: SystemParam<I>>() -> impl SystemParamBuilder<T, I> {
+        Self(PhantomData)
     }
 
     /// Helper method for reading a [`Resource`] as a param, equivalent to `of::<Res<T>>()`
-    pub fn resource<'w, T: Resource>() -> impl SystemParamBuilder<Res<'w, T>> {
-        Self
+    pub fn resource<'w, T: Resource>() -> impl SystemParamBuilder<Res<'w, T>, I> {
+        Self(PhantomData)
     }
 
     /// Helper method for mutably accessing a [`Resource`] as a param, equivalent to `of::<ResMut<T>>()`
-    pub fn resource_mut<'w, T: Resource>() -> impl SystemParamBuilder<ResMut<'w, T>> {
-        Self
+    pub fn resource_mut<'w, T: Resource>() -> impl SystemParamBuilder<ResMut<'w, T>, I> {
+        Self(PhantomData)
     }
 
     /// Helper method for adding a [`Local`] as a param, equivalent to `of::<Local<T>>()`
-    pub fn local<'s, T: FromWorld + Send + 'static>() -> impl SystemParamBuilder<Local<'s, T>> {
-        Self
+    pub fn local<'s, T: FromWorld + Send + 'static>() -> impl SystemParamBuilder<Local<'s, T>, I> {
+        Self(PhantomData)
     }
 
     /// Helper method for adding a [`Query`] as a param, equivalent to `of::<Query<D>>()`
-    pub fn query<'w, 's, D: QueryData + 'static>() -> impl SystemParamBuilder<Query<'w, 's, D, ()>>
-    {
-        Self
+    pub fn query<'w, 's, D: QueryData + 'static>(
+    ) -> impl SystemParamBuilder<Query<'w, 's, D, ()>, I> {
+        Self(PhantomData)
     }
 
     /// Helper method for adding a filtered [`Query`] as a param, equivalent to `of::<Query<D, F>>()`
     pub fn query_filtered<'w, 's, D: QueryData + 'static, F: QueryFilter + 'static>(
-    ) -> impl SystemParamBuilder<Query<'w, 's, D, F>> {
-        Self
+    ) -> impl SystemParamBuilder<Query<'w, 's, D, F>, I> {
+        Self(PhantomData)
     }
 }
 
 // SAFETY: Calls `init_query_param`, just like `Query::init_state`.
-unsafe impl<'w, 's, D: QueryData + 'static, F: QueryFilter + 'static>
-    SystemParamBuilder<Query<'w, 's, D, F>> for QueryState<D, F>
+unsafe impl<'w, 's, D: QueryData + 'static, F: QueryFilter + 'static, I: SystemInput>
+    SystemParamBuilder<Query<'w, 's, D, F>, I> for QueryState<D, F>
 {
     fn build(self, world: &mut World, system_meta: &mut SystemMeta) -> QueryState<D, F> {
         self.validate_world(world.id());
@@ -284,8 +285,9 @@ unsafe impl<
         's,
         D: QueryData + 'static,
         F: QueryFilter + 'static,
+        I: SystemInput,
         T: FnOnce(&mut QueryBuilder<D, F>),
-    > SystemParamBuilder<Query<'w, 's, D, F>> for QueryParamBuilder<T>
+    > SystemParamBuilder<Query<'w, 's, D, F>, I> for QueryParamBuilder<T>
 {
     fn build(self, world: &mut World, system_meta: &mut SystemMeta) -> QueryState<D, F> {
         let mut builder = QueryBuilder::new(world);
@@ -300,8 +302,8 @@ macro_rules! impl_system_param_builder_tuple {
     ($(#[$meta:meta])* $(($param: ident, $builder: ident)),*) => {
         $(#[$meta])*
         // SAFETY: implementors of each `SystemParamBuilder` in the tuple have validated their impls
-        unsafe impl<$($param: SystemParam,)* $($builder: SystemParamBuilder<$param>,)*> SystemParamBuilder<($($param,)*)> for ($($builder,)*) {
-            fn build(self, _world: &mut World, _meta: &mut SystemMeta) -> <($($param,)*) as SystemParam>::State {
+        unsafe impl<$($param: SystemParam<I>,)* I: SystemInput, $($builder: SystemParamBuilder<$param, I>,)*> SystemParamBuilder<($($param,)*), I> for ($($builder,)*) {
+            fn build(self, _world: &mut World, _meta: &mut SystemMeta) -> <($($param,)*) as SystemParam<I>>::State {
                 #[allow(non_snake_case)]
                 let ($($builder,)*) = self;
                 #[allow(clippy::unused_unit)]
@@ -321,8 +323,10 @@ all_tuples!(
 );
 
 // SAFETY: implementors of each `SystemParamBuilder` in the vec have validated their impls
-unsafe impl<P: SystemParam, B: SystemParamBuilder<P>> SystemParamBuilder<Vec<P>> for Vec<B> {
-    fn build(self, world: &mut World, meta: &mut SystemMeta) -> <Vec<P> as SystemParam>::State {
+unsafe impl<P: SystemParam<I>, I: SystemInput, B: SystemParamBuilder<P, I>>
+    SystemParamBuilder<Vec<P>, I> for Vec<B>
+{
+    fn build(self, world: &mut World, meta: &mut SystemMeta) -> <Vec<P> as SystemParam<I>>::State {
         self.into_iter()
             .map(|builder| builder.build(world, meta))
             .collect()
@@ -405,9 +409,9 @@ pub struct ParamSetBuilder<T>(pub T);
 macro_rules! impl_param_set_builder_tuple {
     ($(($param: ident, $builder: ident, $meta: ident)),*) => {
         // SAFETY: implementors of each `SystemParamBuilder` in the tuple have validated their impls
-        unsafe impl<'w, 's, $($param: SystemParam,)* $($builder: SystemParamBuilder<$param>,)*> SystemParamBuilder<ParamSet<'w, 's, ($($param,)*)>> for ParamSetBuilder<($($builder,)*)> {
+        unsafe impl<'w, 's, $($param: SystemParam<()>,)* I: SystemInput, $($builder: SystemParamBuilder<$param, ()>,)*> SystemParamBuilder<ParamSet<'w, 's, ($($param,)*)>, I> for ParamSetBuilder<($($builder,)*)> {
             #[allow(non_snake_case)]
-            fn build(self, _world: &mut World, _system_meta: &mut SystemMeta) -> <($($param,)*) as SystemParam>::State {
+            fn build(self, _world: &mut World, _system_meta: &mut SystemMeta) -> <($($param,)*) as SystemParam<()>>::State {
                 let ParamSetBuilder(($($builder,)*)) = self;
                 // Note that this is slightly different from `init_state`, which calls `init_state` on each param twice.
                 // One call populates an empty `SystemMeta` with the new access, while the other runs against a cloned `SystemMeta` to check for conflicts.
@@ -441,14 +445,14 @@ all_tuples!(impl_param_set_builder_tuple, 1, 8, P, B, meta);
 
 // SAFETY: Relevant parameter ComponentId and ArchetypeComponentId access is applied to SystemMeta. If any ParamState conflicts
 // with any prior access, a panic will occur.
-unsafe impl<'w, 's, P: SystemParam, B: SystemParamBuilder<P>>
-    SystemParamBuilder<ParamSet<'w, 's, Vec<P>>> for ParamSetBuilder<Vec<B>>
+unsafe impl<'w, 's, P: SystemParam<()>, I: SystemInput, B: SystemParamBuilder<P, ()>>
+    SystemParamBuilder<ParamSet<'w, 's, Vec<P>>, I> for ParamSetBuilder<Vec<B>>
 {
     fn build(
         self,
         world: &mut World,
         system_meta: &mut SystemMeta,
-    ) -> <Vec<P> as SystemParam>::State {
+    ) -> <Vec<P> as SystemParam<()>>::State {
         let mut states = Vec::with_capacity(self.0.len());
         let mut metas = Vec::with_capacity(self.0.len());
         for builder in self.0 {
@@ -473,29 +477,33 @@ unsafe impl<'w, 's, P: SystemParam, B: SystemParamBuilder<P>>
 
 /// A [`SystemParamBuilder`] for a [`DynSystemParam`].
 /// See the [`DynSystemParam`] docs for examples.
-pub struct DynParamBuilder<'a>(
+pub struct DynParamBuilder<'a, I: SystemInput + 'static = ()>(
     Box<dyn FnOnce(&mut World, &mut SystemMeta) -> DynSystemParamState + 'a>,
+    PhantomData<fn(I)>,
 );
 
-impl<'a> DynParamBuilder<'a> {
+impl<'a, I: SystemInput + 'static> DynParamBuilder<'a, I> {
     /// Creates a new [`DynParamBuilder`] by wrapping a [`SystemParamBuilder`] of any type.
     /// The built [`DynSystemParam`] can be downcast to `T`.
-    pub fn new<T: SystemParam + 'static>(builder: impl SystemParamBuilder<T> + 'a) -> Self {
-        Self(Box::new(|world, meta| {
-            DynSystemParamState::new::<T>(builder.build(world, meta))
-        }))
+    pub fn new<T: SystemParam<I> + 'static>(builder: impl SystemParamBuilder<T, I> + 'a) -> Self {
+        Self(
+            Box::new(|world, meta| DynSystemParamState::new::<T, I>(builder.build(world, meta))),
+            PhantomData,
+        )
     }
 }
 
 // SAFETY: `DynSystemParam::get_param` will call `get_param` on the boxed `DynSystemParamState`,
 // and the boxed builder was a valid implementation of `SystemParamBuilder` for that type.
 // The resulting `DynSystemParam` can only perform access by downcasting to that param type.
-unsafe impl<'a, 'w, 's> SystemParamBuilder<DynSystemParam<'w, 's>> for DynParamBuilder<'a> {
+unsafe impl<'a, 'w, 's, I: SystemInput + 'static> SystemParamBuilder<DynSystemParam<'w, 's, I>, I>
+    for DynParamBuilder<'a>
+{
     fn build(
         self,
         world: &mut World,
         meta: &mut SystemMeta,
-    ) -> <DynSystemParam<'w, 's> as SystemParam>::State {
+    ) -> <DynSystemParam<'w, 's, I> as SystemParam<I>>::State {
         (self.0)(world, meta)
     }
 }
@@ -522,14 +530,14 @@ unsafe impl<'a, 'w, 's> SystemParamBuilder<DynSystemParam<'w, 's>> for DynParamB
 pub struct LocalBuilder<T>(pub T);
 
 // SAFETY: `Local` performs no world access.
-unsafe impl<'s, T: FromWorld + Send + 'static> SystemParamBuilder<Local<'s, T>>
+unsafe impl<'s, T: FromWorld + Send + 'static, I: SystemInput> SystemParamBuilder<Local<'s, T>, I>
     for LocalBuilder<T>
 {
     fn build(
         self,
         _world: &mut World,
         _meta: &mut SystemMeta,
-    ) -> <Local<'s, T> as SystemParam>::State {
+    ) -> <Local<'s, T> as SystemParam<I>>::State {
         SyncCell::new(self.0)
     }
 }
@@ -558,14 +566,14 @@ impl<'a> FilteredResourcesParamBuilder<Box<dyn FnOnce(&mut FilteredResourcesBuil
 
 // SAFETY: Resource ComponentId and ArchetypeComponentId access is applied to SystemMeta. If this FilteredResources
 // conflicts with any prior access, a panic will occur.
-unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesBuilder)>
-    SystemParamBuilder<FilteredResources<'w, 's>> for FilteredResourcesParamBuilder<T>
+unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesBuilder), I: SystemInput>
+    SystemParamBuilder<FilteredResources<'w, 's>, I> for FilteredResourcesParamBuilder<T>
 {
     fn build(
         self,
         world: &mut World,
         meta: &mut SystemMeta,
-    ) -> <FilteredResources<'w, 's> as SystemParam>::State {
+    ) -> <FilteredResources<'w, 's> as SystemParam<I>>::State {
         let mut builder = FilteredResourcesBuilder::new(world);
         (self.0)(&mut builder);
         let access = builder.build();
@@ -621,14 +629,14 @@ impl<'a> FilteredResourcesMutParamBuilder<Box<dyn FnOnce(&mut FilteredResourcesM
 
 // SAFETY: Resource ComponentId and ArchetypeComponentId access is applied to SystemMeta. If this FilteredResources
 // conflicts with any prior access, a panic will occur.
-unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesMutBuilder)>
-    SystemParamBuilder<FilteredResourcesMut<'w, 's>> for FilteredResourcesMutParamBuilder<T>
+unsafe impl<'w, 's, T: FnOnce(&mut FilteredResourcesMutBuilder), I: SystemInput>
+    SystemParamBuilder<FilteredResourcesMut<'w, 's>, I> for FilteredResourcesMutParamBuilder<T>
 {
     fn build(
         self,
         world: &mut World,
         meta: &mut SystemMeta,
-    ) -> <FilteredResourcesMut<'w, 's> as SystemParam>::State {
+    ) -> <FilteredResourcesMut<'w, 's> as SystemParam<I>>::State {
         let mut builder = FilteredResourcesMutBuilder::new(world);
         (self.0)(&mut builder);
         let access = builder.build();
@@ -761,7 +769,7 @@ mod tests {
         world.spawn(A);
         world.spawn_empty();
 
-        let system = (LocalBuilder(0), ParamBuilder)
+        let system = (LocalBuilder(0), ParamBuilder(PhantomData))
             .build_state(&mut world)
             .build_system(multi_param_system);
 
@@ -883,11 +891,13 @@ mod tests {
             DynParamBuilder::new::<Query<()>>(QueryParamBuilder::new(|builder| {
                 builder.with::<A>();
             })),
-            DynParamBuilder::new::<&Entities>(ParamBuilder),
+            DynParamBuilder::new::<&Entities>(ParamBuilder(PhantomData)),
         )
             .build_state(&mut world)
             .build_system(
-                |mut p0: DynSystemParam, mut p1: DynSystemParam, mut p2: DynSystemParam| {
+                |mut p0: DynSystemParam<()>,
+                 mut p1: DynSystemParam<()>,
+                 mut p2: DynSystemParam<()>| {
                     let local = *p0.downcast_mut::<Local<usize>>().unwrap();
                     let query_count = p1.downcast_mut::<Query<()>>().unwrap().iter().count();
                     let _entities = p2.downcast_mut::<&Entities>().unwrap();

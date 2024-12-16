@@ -91,12 +91,12 @@ unsafe impl Sync for Commands<'_, '_> {}
 const _: () = {
     type __StructFieldsAlias<'w, 's> = (Deferred<'s, CommandQueue>, &'w Entities);
     #[doc(hidden)]
-    pub struct FetchState {
-        state: <__StructFieldsAlias<'static, 'static> as bevy_ecs::system::SystemParam>::State,
+    pub struct FetchState<I: SystemInput> {
+        state: <__StructFieldsAlias<'static, 'static> as bevy_ecs::system::SystemParam<I>>::State,
     }
     // SAFETY: Only reads Entities
-    unsafe impl bevy_ecs::system::SystemParam for Commands<'_, '_> {
-        type State = FetchState;
+    unsafe impl<I: SystemInput + 'static> bevy_ecs::system::SystemParam<I> for Commands<'_, '_> {
+        type State = FetchState<I>;
 
         type Item<'w, 's> = Commands<'w, 's>;
 
@@ -105,10 +105,11 @@ const _: () = {
             system_meta: &mut bevy_ecs::system::SystemMeta,
         ) -> Self::State {
             FetchState {
-                state: <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam>::init_state(
-                    world,
-                    system_meta,
-                ),
+                state:
+                    <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam<I>>::init_state(
+                        world,
+                        system_meta,
+                    ),
             }
         }
 
@@ -119,7 +120,7 @@ const _: () = {
         ) {
             // SAFETY: Caller guarantees the archetype is from the world used in `init_state`
             unsafe {
-                <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam>::new_archetype(
+                <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam<I>>::new_archetype(
                     &mut state.state,
                     archetype,
                     system_meta,
@@ -132,7 +133,7 @@ const _: () = {
             system_meta: &bevy_ecs::system::SystemMeta,
             world: &mut World,
         ) {
-            <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam>::apply(
+            <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam<I>>::apply(
                 &mut state.state,
                 system_meta,
                 world,
@@ -144,7 +145,7 @@ const _: () = {
             system_meta: &bevy_ecs::system::SystemMeta,
             world: bevy_ecs::world::DeferredWorld,
         ) {
-            <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam>::queue(
+            <__StructFieldsAlias<'_, '_> as bevy_ecs::system::SystemParam<I>>::queue(
                 &mut state.state,
                 system_meta,
                 world,
@@ -157,7 +158,7 @@ const _: () = {
             system_meta: &bevy_ecs::system::SystemMeta,
             world: UnsafeWorldCell,
         ) -> bool {
-            <(Deferred<CommandQueue>, &Entities) as bevy_ecs::system::SystemParam>::validate_param(
+            <(Deferred<CommandQueue>, &Entities) as bevy_ecs::system::SystemParam<I>>::validate_param(
                 &state.state,
                 system_meta,
                 world,
@@ -170,8 +171,9 @@ const _: () = {
             system_meta: &bevy_ecs::system::SystemMeta,
             world: UnsafeWorldCell<'w>,
             change_tick: bevy_ecs::component::Tick,
+            input: &I::Inner<'_>,
         ) -> Self::Item<'w, 's> {
-            let(f0, f1) =  <(Deferred<'s, CommandQueue>, &'w Entities) as bevy_ecs::system::SystemParam>::get_param(&mut state.state, system_meta, world, change_tick);
+            let(f0, f1) =  <(Deferred<'s, CommandQueue>, &'w Entities) as bevy_ecs::system::SystemParam<I>>::get_param(&mut state.state, system_meta, world, change_tick, input);
             Commands {
                 queue: InternalQueue::CommandQueue(f0),
                 entities: f1,
@@ -179,10 +181,11 @@ const _: () = {
         }
     }
     // SAFETY: Only reads Entities
-    unsafe impl<'w, 's> bevy_ecs::system::ReadOnlySystemParam for Commands<'w, 's>
+    unsafe impl<'w, 's, I: SystemInput + 'static> bevy_ecs::system::ReadOnlySystemParam<I>
+        for Commands<'w, 's>
     where
-        Deferred<'s, CommandQueue>: bevy_ecs::system::ReadOnlySystemParam,
-        &'w Entities: bevy_ecs::system::ReadOnlySystemParam,
+        Deferred<'s, CommandQueue>: bevy_ecs::system::ReadOnlySystemParam<I>,
+        &'w Entities: bevy_ecs::system::ReadOnlySystemParam<I>,
     {
     }
 };

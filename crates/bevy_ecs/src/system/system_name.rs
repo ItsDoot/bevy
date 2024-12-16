@@ -1,7 +1,7 @@
 use crate::{
     component::Tick,
     prelude::World,
-    system::{ExclusiveSystemParam, ReadOnlySystemParam, SystemMeta, SystemParam},
+    system::{ExclusiveSystemParam, ReadOnlySystemParam, SystemInput, SystemMeta, SystemParam},
     world::unsafe_world_cell::UnsafeWorldCell,
 };
 use alloc::borrow::Cow;
@@ -53,7 +53,7 @@ impl<'s> Deref for SystemName<'s> {
 }
 
 // SAFETY: no component value access
-unsafe impl SystemParam for SystemName<'_> {
+unsafe impl<I: SystemInput> SystemParam<I> for SystemName<'_> {
     type State = Cow<'static, str>;
     type Item<'w, 's> = SystemName<'s>;
 
@@ -67,13 +67,14 @@ unsafe impl SystemParam for SystemName<'_> {
         _system_meta: &SystemMeta,
         _world: UnsafeWorldCell<'w>,
         _change_tick: Tick,
+        _input: &I::Inner<'_>,
     ) -> Self::Item<'w, 's> {
         SystemName(name)
     }
 }
 
 // SAFETY: Only reads internal system state
-unsafe impl<'s> ReadOnlySystemParam for SystemName<'s> {}
+unsafe impl<I: SystemInput> ReadOnlySystemParam<I> for SystemName<'_> {}
 
 impl ExclusiveSystemParam for SystemName<'_> {
     type State = Cow<'static, str>;

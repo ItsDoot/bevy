@@ -1,7 +1,7 @@
 use crate::{
     prelude::{FromWorld, QueryState},
     query::{QueryData, QueryFilter},
-    system::{Local, SystemMeta, SystemParam, SystemState},
+    system::{Local, SystemInput, SystemMeta, SystemParam, SystemState},
     world::World,
 };
 use bevy_utils::synccell::SyncCell;
@@ -49,9 +49,11 @@ impl<'a, D: QueryData + 'static, F: QueryFilter + 'static> ExclusiveSystemParam
     }
 }
 
-impl<'a, P: SystemParam + 'static> ExclusiveSystemParam for &'a mut SystemState<P> {
-    type State = SystemState<P>;
-    type Item<'s> = &'s mut SystemState<P>;
+impl<'a, P: SystemParam<I> + 'static, I: SystemInput> ExclusiveSystemParam
+    for &'a mut SystemState<P, I>
+{
+    type State = SystemState<P, I>;
+    type Item<'s> = &'s mut SystemState<P, I>;
 
     fn init(world: &mut World, _system_meta: &mut SystemMeta) -> Self::State {
         SystemState::new(world)
