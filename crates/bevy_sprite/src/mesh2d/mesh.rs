@@ -356,7 +356,7 @@ impl GetBatchData for Mesh2dPipeline {
     type BufferData = Mesh2dUniform;
 
     fn get_batch_data(
-        (mesh_instances, _, _): &SystemParamItem<Self::Param>,
+        (mesh_instances, _, _): &SystemParamItem<Self::Param, ()>,
         (_entity, main_entity): (Entity, MainEntity),
     ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
         let mesh_instance = mesh_instances.get(&main_entity)?;
@@ -374,7 +374,7 @@ impl GetFullBatchData for Mesh2dPipeline {
     type BufferInputData = ();
 
     fn get_binned_batch_data(
-        (mesh_instances, _, _): &SystemParamItem<Self::Param>,
+        (mesh_instances, _, _): &SystemParamItem<Self::Param, ()>,
         (_entity, main_entity): (Entity, MainEntity),
     ) -> Option<Self::BufferData> {
         let mesh_instance = mesh_instances.get(&main_entity)?;
@@ -382,7 +382,7 @@ impl GetFullBatchData for Mesh2dPipeline {
     }
 
     fn get_index_and_compare_data(
-        _: &SystemParamItem<Self::Param>,
+        _: &SystemParamItem<Self::Param, ()>,
         _query_item: (Entity, MainEntity),
     ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
         error!(
@@ -393,7 +393,7 @@ impl GetFullBatchData for Mesh2dPipeline {
     }
 
     fn get_binned_index(
-        _: &SystemParamItem<Self::Param>,
+        _: &SystemParamItem<Self::Param, ()>,
         _query_item: (Entity, MainEntity),
     ) -> Option<NonMaxU32> {
         error!(
@@ -404,7 +404,7 @@ impl GetFullBatchData for Mesh2dPipeline {
     }
 
     fn get_batch_indirect_parameters_index(
-        (mesh_instances, meshes, mesh_allocator): &SystemParamItem<Self::Param>,
+        (mesh_instances, meshes, mesh_allocator): &SystemParamItem<Self::Param, ()>,
         indirect_parameters_buffer: &mut bevy_render::batching::gpu_preprocessing::IndirectParametersBuffer,
         (_entity, main_entity): (Entity, MainEntity),
         instance_index: u32,
@@ -756,7 +756,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dViewBindGroup<I
         _item: &P,
         (view_uniform, mesh2d_view_bind_group): ROQueryItem<'w, Self::ViewQuery>,
         _view: Option<()>,
-        _param: SystemParamItem<'w, '_, Self::Param>,
+        _param: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         pass.set_bind_group(I, &mesh2d_view_bind_group.value, &[view_uniform.offset]);
@@ -776,7 +776,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMesh2dBindGroup<I> {
         item: &P,
         _view: (),
         _item_query: Option<()>,
-        mesh2d_bind_group: SystemParamItem<'w, '_, Self::Param>,
+        mesh2d_bind_group: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let mut dynamic_offsets: [u32; 1] = Default::default();
@@ -809,7 +809,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh2d {
         item: &P,
         _view: (),
         _item_query: Option<()>,
-        (meshes, render_mesh2d_instances, mesh_allocator): SystemParamItem<'w, '_, Self::Param>,
+        (meshes, render_mesh2d_instances, mesh_allocator): SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let meshes = meshes.into_inner();

@@ -269,7 +269,7 @@ impl<P: PhaseItem, M: UiMaterial, const I: usize> RenderCommand<P> for SetMatUiV
         _item: &P,
         view_uniform: &'w ViewUniformOffset,
         _entity: Option<()>,
-        ui_meta: SystemParamItem<'w, '_, Self::Param>,
+        ui_meta: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         pass.set_bind_group(
@@ -293,7 +293,7 @@ impl<P: PhaseItem, M: UiMaterial, const I: usize> RenderCommand<P>
         _item: &P,
         _view: (),
         material_handle: Option<ROQueryItem<'_, Self::ItemQuery>>,
-        materials: SystemParamItem<'w, '_, Self::Param>,
+        materials: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(material_handle) = material_handle else {
@@ -318,7 +318,7 @@ impl<P: PhaseItem, M: UiMaterial> RenderCommand<P> for DrawUiMaterialNode<M> {
         _item: &P,
         _view: (),
         batch: Option<&'w UiMaterialBatch<M>>,
-        ui_meta: SystemParamItem<'w, '_, Self::Param>,
+        ui_meta: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(batch) = batch else {
@@ -589,7 +589,7 @@ impl<M: UiMaterial> RenderAsset for PreparedUiMaterial<M> {
     fn prepare_asset(
         material: Self::SourceAsset,
         _: AssetId<Self::SourceAsset>,
-        (render_device, pipeline, ref mut material_param): &mut SystemParamItem<Self::Param>,
+        (render_device, pipeline, ref mut material_param): &mut SystemParamItem<Self::Param, ()>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         match material.as_bind_group(&pipeline.ui_layout, render_device, material_param) {
             Ok(prepared) => Ok(PreparedUiMaterial {

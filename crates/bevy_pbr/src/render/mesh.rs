@@ -1560,7 +1560,10 @@ impl GetBatchData for MeshPipeline {
     type BufferData = MeshUniform;
 
     fn get_batch_data(
-        (mesh_instances, lightmaps, _, mesh_allocator, skin_indices): &SystemParamItem<Self::Param>,
+        (mesh_instances, lightmaps, _, mesh_allocator, skin_indices): &SystemParamItem<
+            Self::Param,
+            (),
+        >,
         (_entity, main_entity): (Entity, MainEntity),
     ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
@@ -1605,7 +1608,7 @@ impl GetFullBatchData for MeshPipeline {
     type BufferInputData = MeshInputUniform;
 
     fn get_index_and_compare_data(
-        (mesh_instances, lightmaps, _, _, _): &SystemParamItem<Self::Param>,
+        (mesh_instances, lightmaps, _, _, _): &SystemParamItem<Self::Param, ()>,
         (_entity, main_entity): (Entity, MainEntity),
     ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
         // This should only be called during GPU building.
@@ -1631,7 +1634,10 @@ impl GetFullBatchData for MeshPipeline {
     }
 
     fn get_binned_batch_data(
-        (mesh_instances, lightmaps, _, mesh_allocator, skin_indices): &SystemParamItem<Self::Param>,
+        (mesh_instances, lightmaps, _, mesh_allocator, skin_indices): &SystemParamItem<
+            Self::Param,
+            (),
+        >,
         (_entity, main_entity): (Entity, MainEntity),
     ) -> Option<Self::BufferData> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
@@ -1662,7 +1668,7 @@ impl GetFullBatchData for MeshPipeline {
     }
 
     fn get_binned_index(
-        (mesh_instances, _, _, _, _): &SystemParamItem<Self::Param>,
+        (mesh_instances, _, _, _, _): &SystemParamItem<Self::Param, ()>,
         (_entity, main_entity): (Entity, MainEntity),
     ) -> Option<NonMaxU32> {
         // This should only be called during GPU building.
@@ -1680,7 +1686,7 @@ impl GetFullBatchData for MeshPipeline {
     }
 
     fn get_batch_indirect_parameters_index(
-        (mesh_instances, _, meshes, mesh_allocator, _): &SystemParamItem<Self::Param>,
+        (mesh_instances, _, meshes, mesh_allocator, _): &SystemParamItem<Self::Param, ()>,
         indirect_parameters_buffer: &mut IndirectParametersBuffer,
         entity: (Entity, MainEntity),
         instance_index: u32,
@@ -2514,7 +2520,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshViewBindGroup<I> 
             maybe_oit_layers_count_offset,
         ): ROQueryItem<'w, Self::ViewQuery>,
         _entity: Option<()>,
-        _: SystemParamItem<'w, '_, Self::Param>,
+        _: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let mut offsets: SmallVec<[u32; 8]> = smallvec![
@@ -2559,7 +2565,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetMeshBindGroup<I> {
             skin_indices,
             morph_indices,
             lightmaps,
-        ): SystemParamItem<'w, '_, Self::Param>,
+        ): SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let bind_groups = bind_groups.into_inner();
@@ -2674,7 +2680,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMesh {
             pipeline_cache,
             mesh_allocator,
             preprocess_pipelines,
-        ): SystemParamItem<'w, '_, Self::Param>,
+        ): SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         // If we're using GPU preprocessing, then we're dependent on that

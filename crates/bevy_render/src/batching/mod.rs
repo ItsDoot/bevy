@@ -74,7 +74,7 @@ impl<T: PartialEq> BatchMeta<T> {
 pub trait GetBatchData {
     /// The system parameters [`GetBatchData::get_batch_data`] needs in
     /// order to compute the batch data.
-    type Param: SystemParam + 'static;
+    type Param: SystemParam<()> + 'static;
     /// Data used for comparison between phase items. If the pipeline id, draw
     /// function id, per-instance data buffer dynamic offset and this data
     /// matches, the draws can be batched.
@@ -92,7 +92,7 @@ pub trait GetBatchData {
     /// instance data building path, we use
     /// [`GetFullBatchData::get_index_and_compare_data`] instead.
     fn get_batch_data(
-        param: &SystemParamItem<Self::Param>,
+        param: &SystemParamItem<Self::Param, ()>,
         query_item: (Entity, MainEntity),
     ) -> Option<(Self::BufferData, Option<Self::CompareData>)>;
 }
@@ -113,7 +113,7 @@ pub trait GetFullBatchData: GetBatchData {
     /// buffer building path, we use
     /// [`GetFullBatchData::get_index_and_compare_data`] instead.
     fn get_binned_batch_data(
-        param: &SystemParamItem<Self::Param>,
+        param: &SystemParamItem<Self::Param, ()>,
         query_item: (Entity, MainEntity),
     ) -> Option<Self::BufferData>;
 
@@ -125,7 +125,7 @@ pub trait GetFullBatchData: GetBatchData {
     /// look up any render data. If CPU instance buffer building is in use, this
     /// function will never be called.
     fn get_index_and_compare_data(
-        param: &SystemParamItem<Self::Param>,
+        param: &SystemParamItem<Self::Param, ()>,
         query_item: (Entity, MainEntity),
     ) -> Option<(NonMaxU32, Option<Self::CompareData>)>;
 
@@ -137,7 +137,7 @@ pub trait GetFullBatchData: GetBatchData {
     /// look up any render data. If CPU instance buffer building is in use, this
     /// function will never be called.
     fn get_binned_index(
-        param: &SystemParamItem<Self::Param>,
+        param: &SystemParamItem<Self::Param, ()>,
         query_item: (Entity, MainEntity),
     ) -> Option<NonMaxU32>;
 
@@ -148,7 +148,7 @@ pub trait GetFullBatchData: GetBatchData {
     /// This is only used if GPU culling is enabled (which requires GPU
     /// preprocessing).
     fn get_batch_indirect_parameters_index(
-        param: &SystemParamItem<Self::Param>,
+        param: &SystemParamItem<Self::Param, ()>,
         indirect_parameters_buffer: &mut IndirectParametersBuffer,
         entity: (Entity, MainEntity),
         instance_index: u32,

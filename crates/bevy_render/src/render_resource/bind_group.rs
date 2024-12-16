@@ -328,7 +328,7 @@ pub trait AsBindGroup {
     /// Data that will be stored alongside the "prepared" bind group.
     type Data: Send + Sync;
 
-    type Param: SystemParam + 'static;
+    type Param: SystemParam<()> + 'static;
 
     /// The number of slots per bind group, if bindless mode is enabled.
     ///
@@ -349,7 +349,7 @@ pub trait AsBindGroup {
         &self,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
-        param: &mut SystemParamItem<'_, '_, Self::Param>,
+        param: &mut SystemParamItem<'_, '_, Self::Param, ()>,
     ) -> Result<PreparedBindGroup<Self::Data>, AsBindGroupError> {
         let UnpreparedBindGroup { bindings, data } =
             Self::unprepared_bind_group(self, layout, render_device, param, false)?;
@@ -386,7 +386,7 @@ pub trait AsBindGroup {
         &self,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
-        param: &mut SystemParamItem<'_, '_, Self::Param>,
+        param: &mut SystemParamItem<'_, '_, Self::Param, ()>,
         force_no_bindless: bool,
     ) -> Result<UnpreparedBindGroup<Self::Data>, AsBindGroupError>;
 

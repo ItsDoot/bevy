@@ -44,7 +44,7 @@ pub trait RenderAsset: Send + Sync + 'static + Sized {
     /// Specifies all ECS data required by [`RenderAsset::prepare_asset`].
     ///
     /// For convenience use the [`lifetimeless`](bevy_ecs::system::lifetimeless) [`SystemParam`].
-    type Param: SystemParam;
+    type Param: SystemParam<()>;
 
     /// Whether or not to unload the asset after extracting it to the render world.
     #[inline]
@@ -66,7 +66,7 @@ pub trait RenderAsset: Send + Sync + 'static + Sized {
     fn prepare_asset(
         source_asset: Self::SourceAsset,
         asset_id: AssetId<Self::SourceAsset>,
-        param: &mut SystemParamItem<Self::Param>,
+        param: &mut SystemParamItem<Self::Param, ()>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>>;
 
     /// Called whenever the [`RenderAsset::SourceAsset`] has been removed.
@@ -77,7 +77,7 @@ pub trait RenderAsset: Send + Sync + 'static + Sized {
     /// The default implementation does nothing.
     fn unload_asset(
         _source_asset: AssetId<Self::SourceAsset>,
-        _param: &mut SystemParamItem<Self::Param>,
+        _param: &mut SystemParamItem<Self::Param, ()>,
     ) {
     }
 }

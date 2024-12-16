@@ -154,7 +154,7 @@ impl<B: Material, E: MaterialExtension> AsBindGroup for ExtendedMaterial<B, E> {
         &self,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
-        (base_param, extended_param): &mut SystemParamItem<'_, '_, Self::Param>,
+        (base_param, extended_param): &mut SystemParamItem<'_, '_, Self::Param, ()>,
         mut force_no_bindless: bool,
     ) -> Result<UnpreparedBindGroup<Self::Data>, AsBindGroupError> {
         // Only allow bindless mode if both the base material and the extension

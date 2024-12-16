@@ -54,7 +54,7 @@ pub fn create_windows<F: QueryFilter + 'static>(
         mut handlers,
         accessibility_requested,
         monitors,
-    ): SystemParamItem<CreateWindowParams<F>>,
+    ): SystemParamItem<CreateWindowParams<F>, ()>,
 ) {
     for (entity, mut window, handle_holder) in &mut created_windows {
         if winit_windows.get_window(entity).is_some() {
@@ -147,7 +147,7 @@ pub(crate) fn check_keyboard_focus_lost(
 /// Synchronize available monitors as reported by [`winit`] with [`Monitor`] entities in the world.
 pub fn create_monitors(
     event_loop: &ActiveEventLoop,
-    (mut commands, mut monitors): SystemParamItem<CreateMonitorParams>,
+    (mut commands, mut monitors): SystemParamItem<CreateMonitorParams, ()>,
 ) {
     let primary_monitor = event_loop.primary_monitor();
     let mut seen_monitors = vec![false; monitors.monitors.len()];

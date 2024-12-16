@@ -10,7 +10,10 @@ use core::{
 use bevy_color::{Color, LinearRgba};
 use bevy_ecs::{
     component::Tick,
-    system::{Deferred, ReadOnlySystemParam, Res, Resource, SystemBuffer, SystemMeta, SystemParam},
+    system::{
+        Deferred, ReadOnlySystemParam, Res, Resource, SystemBuffer, SystemInput, SystemMeta,
+        SystemParam,
+    },
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 use bevy_math::{Isometry2d, Isometry3d, Vec2, Vec3};
@@ -174,27 +177,29 @@ type GizmosState<Config, Clear> = (
     Res<'static, GizmoConfigStore>,
 );
 #[doc(hidden)]
-pub struct GizmosFetchState<Config, Clear>
+pub struct GizmosFetchState<I, Config, Clear>
 where
+    I: SystemInput,
     Config: GizmoConfigGroup,
     Clear: 'static + Send + Sync,
 {
-    state: <GizmosState<Config, Clear> as SystemParam>::State,
+    state: <GizmosState<Config, Clear> as SystemParam<I>>::State,
 }
 
 #[allow(unsafe_code)]
 // SAFETY: All methods are delegated to existing `SystemParam` implementations
-unsafe impl<Config, Clear> SystemParam for Gizmos<'_, '_, Config, Clear>
+unsafe impl<I, Config, Clear> SystemParam<I> for Gizmos<'_, '_, Config, Clear>
 where
+    I: SystemInput + 'static,
     Config: GizmoConfigGroup,
     Clear: 'static + Send + Sync,
 {
-    type State = GizmosFetchState<Config, Clear>;
+    type State = GizmosFetchState<I, Config, Clear>;
     type Item<'w, 's> = Gizmos<'w, 's, Config, Clear>;
 
     fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
         GizmosFetchState {
-            state: GizmosState::<Config, Clear>::init_state(world, system_meta),
+            state: <GizmosState<Config, Clear> as SystemParam<I>>::init_state(world, system_meta),
         }
     }
 
@@ -205,12 +210,16 @@ where
     ) {
         // SAFETY: The caller ensures that `archetype` is from the World the state was initialized from in `init_state`.
         unsafe {
-            GizmosState::<Config, Clear>::new_archetype(&mut state.state, archetype, system_meta);
+            <GizmosState<Config, Clear> as SystemParam<I>>::new_archetype(
+                &mut state.state,
+                archetype,
+                system_meta,
+            );
         };
     }
 
     fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {
-        GizmosState::<Config, Clear>::apply(&mut state.state, system_meta, world);
+        <GizmosState<Config, Clear> as SystemParam<I>>::apply(&mut state.state, system_meta, world);
     }
 
     #[inline]
@@ -220,7 +229,13 @@ where
         world: UnsafeWorldCell,
     ) -> bool {
         // SAFETY: Delegated to existing `SystemParam` implementations.
-        unsafe { GizmosState::<Config, Clear>::validate_param(&state.state, system_meta, world) }
+        unsafe {
+            <GizmosState<Config, Clear> as SystemParam<I>>::validate_param(
+                &state.state,
+                system_meta,
+                world,
+            )
+        }
     }
 
     #[inline]
@@ -229,14 +244,16 @@ where
         system_meta: &SystemMeta,
         world: UnsafeWorldCell<'w>,
         change_tick: Tick,
+        input: &I::Inner<'_>,
     ) -> Self::Item<'w, 's> {
         // SAFETY: Delegated to existing `SystemParam` implementations.
         let (mut f0, f1) = unsafe {
-            GizmosState::<Config, Clear>::get_param(
+            <GizmosState<Config, Clear> as SystemParam<I>>::get_param(
                 &mut state.state,
                 system_meta,
                 world,
                 change_tick,
+                input,
             )
         };
 
@@ -256,12 +273,13 @@ where
 
 #[allow(unsafe_code)]
 // Safety: Each field is `ReadOnlySystemParam`, and Gizmos SystemParam does not mutate world
-unsafe impl<'w, 's, Config, Clear> ReadOnlySystemParam for Gizmos<'w, 's, Config, Clear>
+unsafe impl<'w, 's, I, Config, Clear> ReadOnlySystemParam<I> for Gizmos<'w, 's, Config, Clear>
 where
+    I: SystemInput + 'static,
     Config: GizmoConfigGroup,
     Clear: 'static + Send + Sync,
-    Deferred<'s, GizmoBuffer<Config, Clear>>: ReadOnlySystemParam,
-    Res<'w, GizmoConfigStore>: ReadOnlySystemParam,
+    Deferred<'s, GizmoBuffer<Config, Clear>>: ReadOnlySystemParam<I>,
+    Res<'w, GizmoConfigStore>: ReadOnlySystemParam<I>,
 {
 }
 

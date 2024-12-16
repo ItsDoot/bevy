@@ -526,7 +526,7 @@ impl RenderAsset for GpuLineGizmo {
     fn prepare_asset(
         gizmo: Self::SourceAsset,
         _: AssetId<Self::SourceAsset>,
-        render_device: &mut SystemParamItem<Self::Param>,
+        render_device: &mut SystemParamItem<Self::Param, ()>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         let list_position_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             usage: BufferUsages::VERTEX,
@@ -606,7 +606,7 @@ impl<const I: usize, P: PhaseItem> RenderCommand<P> for SetLineGizmoBindGroup<I>
         _item: &P,
         _view: ROQueryItem<'w, Self::ViewQuery>,
         uniform_index: Option<ROQueryItem<'w, Self::ItemQuery>>,
-        bind_group: SystemParamItem<'w, '_, Self::Param>,
+        bind_group: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(uniform_index) = uniform_index else {
@@ -637,7 +637,7 @@ impl<P: PhaseItem, const STRIP: bool> RenderCommand<P> for DrawLineGizmo<STRIP> 
         _item: &P,
         _view: ROQueryItem<'w, Self::ViewQuery>,
         config: Option<ROQueryItem<'w, Self::ItemQuery>>,
-        line_gizmos: SystemParamItem<'w, '_, Self::Param>,
+        line_gizmos: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(config) = config else {
@@ -700,7 +700,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLineJointGizmo {
         _item: &P,
         _view: ROQueryItem<'w, Self::ViewQuery>,
         config: Option<ROQueryItem<'w, Self::ItemQuery>>,
-        line_gizmos: SystemParamItem<'w, '_, Self::Param>,
+        line_gizmos: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(config) = config else {

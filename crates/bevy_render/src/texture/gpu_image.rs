@@ -43,7 +43,7 @@ impl RenderAsset for GpuImage {
     fn prepare_asset(
         image: Self::SourceAsset,
         _: AssetId<Self::SourceAsset>,
-        (render_device, render_queue, default_sampler): &mut SystemParamItem<Self::Param>,
+        (render_device, render_queue, default_sampler): &mut SystemParamItem<Self::Param, ()>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         let texture = render_device.create_texture_with_data(
             render_queue,

@@ -173,7 +173,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetUiViewBindGroup<I> {
         _item: &P,
         view_uniform: &'w ViewUniformOffset,
         _entity: Option<()>,
-        ui_meta: SystemParamItem<'w, '_, Self::Param>,
+        ui_meta: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(view_bind_group) = ui_meta.into_inner().view_bind_group.as_ref() else {
@@ -194,7 +194,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetUiTextureBindGroup<I>
         _item: &P,
         _view: (),
         batch: Option<&'w UiBatch>,
-        image_bind_groups: SystemParamItem<'w, '_, Self::Param>,
+        image_bind_groups: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let image_bind_groups = image_bind_groups.into_inner();
@@ -218,7 +218,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawUiNode {
         _item: &P,
         _view: (),
         batch: Option<&'w UiBatch>,
-        ui_meta: SystemParamItem<'w, '_, Self::Param>,
+        ui_meta: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let Some(batch) = batch else {

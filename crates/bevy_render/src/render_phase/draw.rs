@@ -187,7 +187,7 @@ pub trait RenderCommand<P: PhaseItem> {
     ///
     /// [`SRes`]: bevy_ecs::system::lifetimeless::SRes
     /// [`SRes::into_inner`]: bevy_ecs::system::lifetimeless::SRes::into_inner
-    type Param: SystemParam + 'static;
+    type Param: SystemParam<()> + 'static;
     /// Specifies the ECS data of the view entity required by [`RenderCommand::render`].
     ///
     /// The view entity refers to the camera, or shadow-casting light, etc. from which the phase
@@ -211,7 +211,7 @@ pub trait RenderCommand<P: PhaseItem> {
         item: &P,
         view: ROQueryItem<'w, Self::ViewQuery>,
         entity: Option<ROQueryItem<'w, Self::ItemQuery>>,
-        param: SystemParamItem<'w, '_, Self::Param>,
+        param: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult;
 }
@@ -237,7 +237,7 @@ macro_rules! render_command_tuple_impl {
                 _item: &P,
                 ($($view,)*): ROQueryItem<'w, Self::ViewQuery>,
                 maybe_entities: Option<ROQueryItem<'w, Self::ItemQuery>>,
-                ($($name,)*): SystemParamItem<'w, '_, Self::Param>,
+                ($($name,)*): SystemParamItem<'w, '_, Self::Param, ()>,
                 _pass: &mut TrackedRenderPass<'w>,
             ) -> RenderCommandResult {
                 match maybe_entities {
@@ -299,7 +299,7 @@ impl<P: PhaseItem, C: RenderCommand<P>> RenderCommandState<P, C> {
 
 impl<P: PhaseItem, C: RenderCommand<P> + Send + Sync + 'static> Draw<P> for RenderCommandState<P, C>
 where
-    C::Param: ReadOnlySystemParam,
+    C::Param: ReadOnlySystemParam<()>,
 {
     /// Prepares the render command to be used. This is called once and only once before the phase
     /// begins. There may be zero or more [`draw`](RenderCommandState::draw) calls following a call to this function.
@@ -345,7 +345,7 @@ pub trait AddRenderCommand {
         &mut self,
     ) -> &mut Self
     where
-        C::Param: ReadOnlySystemParam;
+        C::Param: ReadOnlySystemParam<()>;
 }
 
 impl AddRenderCommand for SubApp {
@@ -353,7 +353,7 @@ impl AddRenderCommand for SubApp {
         &mut self,
     ) -> &mut Self
     where
-        C::Param: ReadOnlySystemParam,
+        C::Param: ReadOnlySystemParam<()>,
     {
         let draw_function = RenderCommandState::<P, C>::new(self.world_mut());
         let draw_functions = self
@@ -376,7 +376,7 @@ impl AddRenderCommand for App {
         &mut self,
     ) -> &mut Self
     where
-        C::Param: ReadOnlySystemParam,
+        C::Param: ReadOnlySystemParam<()>,
     {
         SubApp::add_render_command::<P, C>(self.main_mut());
         self

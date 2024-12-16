@@ -502,6 +502,7 @@ impl<P: PhaseItem, M: Material, const I: usize> RenderCommand<P> for SetMaterial
             'w,
             '_,
             Self::Param,
+            (),
         >,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
@@ -1039,7 +1040,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
             mesh_material_ids,
             ref mut bind_group_allocator,
             ref mut material_param,
-        ): &mut SystemParamItem<Self::Param>,
+        ): &mut SystemParamItem<Self::Param, ()>,
     ) -> Result<Self, PrepareAssetError<Self::SourceAsset>> {
         // Fetch the material binding ID, so that we can write it in to the
         // `PreparedMaterial`.
@@ -1136,6 +1137,7 @@ impl<M: Material> RenderAsset for PreparedMaterial<M> {
         asset_id: AssetId<Self::SourceAsset>,
         (_, _, _, mesh_material_ids, ref mut bind_group_allocator, _): &mut SystemParamItem<
             Self::Param,
+            (),
         >,
     ) {
         // Mark this material's slot in the binding array as free.

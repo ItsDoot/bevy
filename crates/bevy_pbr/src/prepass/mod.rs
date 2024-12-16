@@ -1033,7 +1033,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetPrepassViewBindGroup<
             Option<&'_ PreviousViewUniformOffset>,
         ),
         _entity: Option<()>,
-        prepass_view_bind_group: SystemParamItem<'w, '_, Self::Param>,
+        prepass_view_bind_group: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let prepass_view_bind_group = prepass_view_bind_group.into_inner();

@@ -1149,7 +1149,7 @@ impl<P: CachedRenderPipelinePhaseItem> RenderCommand<P> for SetItemPipeline {
         item: &P,
         _view: (),
         _entity: Option<()>,
-        pipeline_cache: SystemParamItem<'w, '_, Self::Param>,
+        pipeline_cache: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         if let Some(pipeline) = pipeline_cache

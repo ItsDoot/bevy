@@ -812,7 +812,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteViewBindGroup<I
         _item: &P,
         (view_uniform, sprite_view_bind_group): ROQueryItem<'w, Self::ViewQuery>,
         _entity: Option<()>,
-        _param: SystemParamItem<'w, '_, Self::Param>,
+        _param: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         pass.set_bind_group(I, &sprite_view_bind_group.value, &[view_uniform.offset]);
@@ -829,7 +829,7 @@ impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetSpriteTextureBindGrou
         _item: &P,
         _view: (),
         batch: Option<&'_ SpriteBatch>,
-        image_bind_groups: SystemParamItem<'w, '_, Self::Param>,
+        image_bind_groups: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let image_bind_groups = image_bind_groups.into_inner();
@@ -859,7 +859,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawSpriteBatch {
         _item: &P,
         _view: (),
         batch: Option<&'_ SpriteBatch>,
-        sprite_meta: SystemParamItem<'w, '_, Self::Param>,
+        sprite_meta: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         let sprite_meta = sprite_meta.into_inner();
