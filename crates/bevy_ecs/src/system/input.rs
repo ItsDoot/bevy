@@ -1,4 +1,7 @@
-use core::ops::{Deref, DerefMut};
+use core::{
+    borrow::{Borrow, BorrowMut},
+    ops::{Deref, DerefMut},
+};
 
 use variadics_please::all_tuples;
 
@@ -111,6 +114,18 @@ impl<T> DerefMut for In<T> {
     }
 }
 
+impl<T> Borrow<T> for In<T> {
+    fn borrow(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> BorrowMut<T> for In<T> {
+    fn borrow_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
 /// A [`SystemInput`] type which denotes that a [`System`] receives
 /// a read-only reference to a value of type `T` from its caller.
 ///
@@ -160,6 +175,12 @@ impl<'i, T: ?Sized> Deref for InRef<'i, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<T: ?Sized> Borrow<T> for InRef<'_, T> {
+    fn borrow(&self) -> &T {
         self.0
     }
 }
@@ -215,6 +236,18 @@ impl<'i, T: ?Sized> Deref for InMut<'i, T> {
 
 impl<'i, T: ?Sized> DerefMut for InMut<'i, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+impl<T: ?Sized> Borrow<T> for InMut<'_, T> {
+    fn borrow(&self) -> &T {
+        self.0
+    }
+}
+
+impl<T: ?Sized> BorrowMut<T> for InMut<'_, T> {
+    fn borrow_mut(&mut self) -> &mut T {
         self.0
     }
 }

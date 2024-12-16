@@ -4,13 +4,13 @@ use crate::{
     bundle::Bundles,
     change_detection::{Ticks, TicksMut},
     component::{ComponentId, ComponentTicks, Components, Tick},
-    entity::Entities,
+    entity::{Entities, Entity},
     query::{
         Access, FilteredAccess, FilteredAccessSet, QueryData, QueryFilter, QuerySingleError,
         QueryState, ReadOnlyQueryData,
     },
     storage::ResourceData,
-    system::{Query, Single, SystemInput, SystemMeta},
+    system::{Query, Single, SystemInput, SystemMeta, Target},
     world::{
         unsafe_world_cell::UnsafeWorldCell, DeferredWorld, FilteredResources, FilteredResourcesMut,
         FromWorld, World,
@@ -567,6 +567,107 @@ unsafe impl<I: SystemInput, D: QueryData + 'static, F: QueryFilter + 'static> Sy
 // SAFETY: QueryState is constrained to read-only fetches, so it only reads World.
 unsafe impl<I: SystemInput, D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static>
     ReadOnlySystemParam<I> for Populated<'_, '_, D, F>
+{
+}
+
+// SAFETY: QueryState::init_state registers all of its world accesses with the provided SystemMeta.
+unsafe impl<I: SystemInput, D: QueryData + 'static, F: QueryFilter + 'static> SystemParam<I>
+    for Target<'_, D, F>
+where
+    for<'a> I::Inner<'a>: core::borrow::Borrow<Entity>,
+{
+    type State = QueryState<D, F>;
+    type Item<'world, 'state> = Target<'world, D, F>;
+
+    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+        <Query<D, F> as SystemParam<I>>::init_state(world, system_meta)
+    }
+
+    unsafe fn new_archetype(
+        state: &mut Self::State,
+        archetype: &Archetype,
+        system_meta: &mut SystemMeta,
+    ) {
+        // SAFETY: Delegate to existing `SystemParam` implementations.
+        unsafe { <Query<D, F> as SystemParam<I>>::new_archetype(state, archetype, system_meta) };
+    }
+
+    unsafe fn get_param<'world, 'state>(
+        state: &'state mut Self::State,
+        system_meta: &SystemMeta,
+        world: UnsafeWorldCell<'world>,
+        change_tick: Tick,
+        input: &I::Inner<'_>,
+    ) -> Self::Item<'world, 'state> {
+        state.validate_world(world.id());
+        let target = core::borrow::Borrow::borrow(input);
+        // SAFETY: QueryState ensures that the components it accesses are not accessible elsewhere.
+        let result = unsafe {
+            state.get_unchecked_manual(world, *target, system_meta.last_run, change_tick)
+        };
+        let target = result.expect("The query was expected to contain the target entity.");
+        Target {
+            item: target,
+            _filter: PhantomData,
+        }
+    }
+}
+
+// SAFETY: QueryState is constrained to read-only fetches, so it only reads World.
+unsafe impl<I: SystemInput, D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static>
+    ReadOnlySystemParam<I> for Target<'_, D, F>
+where
+    for<'a> I::Inner<'a>: core::borrow::Borrow<Entity>,
+{
+}
+
+// SAFETY: QueryState::init_state registers all of its world accesses with the provided SystemMeta.
+unsafe impl<I: SystemInput, D: QueryData + 'static, F: QueryFilter + 'static> SystemParam<I>
+    for Option<Target<'_, D, F>>
+where
+    for<'a> I::Inner<'a>: core::borrow::Borrow<Entity>,
+{
+    type State = QueryState<D, F>;
+    type Item<'world, 'state> = Option<Target<'world, D, F>>;
+
+    fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
+        <Query<D, F> as SystemParam<I>>::init_state(world, system_meta)
+    }
+
+    unsafe fn new_archetype(
+        state: &mut Self::State,
+        archetype: &Archetype,
+        system_meta: &mut SystemMeta,
+    ) {
+        // SAFETY: Delegate to existing `SystemParam` implementations.
+        unsafe { <Query<D, F> as SystemParam<I>>::new_archetype(state, archetype, system_meta) };
+    }
+
+    unsafe fn get_param<'world, 'state>(
+        state: &'state mut Self::State,
+        system_meta: &SystemMeta,
+        world: UnsafeWorldCell<'world>,
+        change_tick: Tick,
+        input: &I::Inner<'_>,
+    ) -> Self::Item<'world, 'state> {
+        state.validate_world(world.id());
+        let target = core::borrow::Borrow::borrow(input);
+        // SAFETY: QueryState ensures that the components it accesses are not accessible elsewhere.
+        let result = unsafe {
+            state.get_unchecked_manual(world, *target, system_meta.last_run, change_tick)
+        };
+        result.ok().map(|target| Target {
+            item: target,
+            _filter: PhantomData,
+        })
+    }
+}
+
+// SAFETY: QueryState is constrained to read-only fetches, so it only reads World.
+unsafe impl<I: SystemInput, D: ReadOnlyQueryData + 'static, F: QueryFilter + 'static>
+    ReadOnlySystemParam<I> for Option<Target<'_, D, F>>
+where
+    for<'a> I::Inner<'a>: core::borrow::Borrow<Entity>,
 {
 }
 

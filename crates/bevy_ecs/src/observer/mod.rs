@@ -167,6 +167,12 @@ impl<'w, E, B: Bundle> DerefMut for Trigger<'w, E, B> {
     }
 }
 
+impl<E, B: Bundle> core::borrow::Borrow<Entity> for Trigger<'_, E, B> {
+    fn borrow(&self) -> &Entity {
+        &self.trigger.target
+    }
+}
+
 /// A description of what an [`Observer`] observes.
 #[derive(Default, Clone)]
 pub struct ObserverDescriptor {
@@ -586,11 +592,12 @@ mod tests {
     use bevy_ptr::OwningPtr;
     use bevy_utils::HashMap;
 
-    use crate as bevy_ecs;
-    use crate::component::ComponentId;
     use crate::{
+        self as bevy_ecs,
+        component::ComponentId,
         observer::{EmitDynamicTrigger, Observer, ObserverDescriptor, ObserverState, OnReplace},
         prelude::*,
+        system::Target,
         traversal::Traversal,
     };
 
@@ -1367,5 +1374,20 @@ mod tests {
         let counter = world.resource::<Counter>();
         assert_eq!(4, *counter.0.get(&a_id).unwrap());
         assert_eq!(3, *counter.0.get(&b_id).unwrap());
+    }
+
+    #[test]
+    fn observer_target_query() {
+        let mut world = World::new();
+        let e1 = world.spawn_empty().id();
+        let e2 = world.spawn(Parent(e1)).id();
+
+        world.add_observer(move |_: Trigger<EventA>, target: Target<&Parent>| {
+            assert_eq!(target.0, e1);
+        });
+        world.flush();
+
+        world.trigger_targets(EventA, e2);
+        world.flush();
     }
 }
