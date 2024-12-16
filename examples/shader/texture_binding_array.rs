@@ -103,7 +103,7 @@ impl AsBindGroup for BindlessMaterial {
         &self,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
-        (image_assets, fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
+        (image_assets, fallback_image): &mut SystemParamItem<'_, '_, Self::Param, ()>,
     ) -> Result<PreparedBindGroup<Self::Data>, AsBindGroupError> {
         // retrieve the render resources from handles
         let mut images = vec![];
@@ -143,7 +143,7 @@ impl AsBindGroup for BindlessMaterial {
         &self,
         _layout: &BindGroupLayout,
         _render_device: &RenderDevice,
-        _param: &mut SystemParamItem<'_, '_, Self::Param>,
+        _param: &mut SystemParamItem<'_, '_, Self::Param, ()>,
         _force_no_bindless: bool,
     ) -> Result<UnpreparedBindGroup<Self::Data>, AsBindGroupError> {
         // We implement `as_bind_group`` directly because bindless texture

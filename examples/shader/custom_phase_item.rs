@@ -69,7 +69,7 @@ where
         _: &P,
         _: ROQueryItem<'w, Self::ViewQuery>,
         _: Option<ROQueryItem<'w, Self::ItemQuery>>,
-        custom_phase_item_buffers: SystemParamItem<'w, '_, Self::Param>,
+        custom_phase_item_buffers: SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         // Borrow check workaround.

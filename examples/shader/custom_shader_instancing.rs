@@ -267,7 +267,7 @@ impl<P: PhaseItem> RenderCommand<P> for DrawMeshInstanced {
         item: &P,
         _view: (),
         instance_buffer: Option<&'w InstanceBuffer>,
-        (meshes, render_mesh_instances, mesh_allocator): SystemParamItem<'w, '_, Self::Param>,
+        (meshes, render_mesh_instances, mesh_allocator): SystemParamItem<'w, '_, Self::Param, ()>,
         pass: &mut TrackedRenderPass<'w>,
     ) -> RenderCommandResult {
         // A borrow check workaround.
