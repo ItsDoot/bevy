@@ -4,6 +4,7 @@ pub(crate) mod command_queue;
 mod component_constants;
 mod deferred_world;
 mod entity_fetch;
+mod entity_ptr;
 mod entity_ref;
 pub mod error;
 mod filtered_resource;
@@ -21,9 +22,13 @@ pub use crate::{
 pub use component_constants::*;
 pub use deferred_world::DeferredWorld;
 pub use entity_fetch::WorldEntityFetch;
+pub use entity_ptr::{
+    Capability, EntityMut, EntityPtr, EntityRef, Except, Exclusive, Full, Global, Only, Scope,
+    Shared,
+};
 pub use entity_ref::{
-    DynamicComponentFetch, EntityMut, EntityMutExcept, EntityRef, EntityRefExcept, EntityWorldMut,
-    Entry, FilteredEntityMut, FilteredEntityRef, OccupiedEntry, TryFromFilteredError, VacantEntry,
+    DynamicComponentFetch, EntityMutExcept, EntityRefExcept, EntityWorldMut, Entry,
+    FilteredEntityMut, FilteredEntityRef, OccupiedEntry, TryFromFilteredError, VacantEntry,
 };
 pub use filtered_resource::*;
 pub use identifier::WorldId;
@@ -1019,7 +1024,7 @@ impl World {
                         location,
                     );
                     // SAFETY: `&self` gives read access to the entire world.
-                    unsafe { EntityRef::new(cell) }
+                    unsafe { EntityRef::new(cell, Full, Shared) }
                 })
         })
     }
@@ -1045,7 +1050,7 @@ impl World {
                     let cell = UnsafeEntityCell::new(world_cell, entity, location);
                     // SAFETY: We have exclusive access to the entire world. We only create one borrow for each entity,
                     // so none will conflict with one another.
-                    unsafe { EntityMut::new(cell) }
+                    unsafe { EntityMut::new(cell, Full, Exclusive) }
                 })
         })
     }
@@ -1251,7 +1256,7 @@ impl World {
     /// ```
     #[inline]
     pub fn get<T: Component>(&self, entity: Entity) -> Option<&T> {
-        self.get_entity(entity).ok()?.get()
+        self.get_entity(entity).ok()?.into_borrow()
     }
 
     /// Retrieves a mutable reference to the given `entity`'s [`Component`] of the given type.
@@ -1275,11 +1280,7 @@ impl World {
         &mut self,
         entity: Entity,
     ) -> Option<Mut<T>> {
-        // SAFETY:
-        // - `as_unsafe_world_cell` is the only thing that is borrowing world
-        // - `as_unsafe_world_cell` provides mutable permission to everything
-        // - `&mut self` ensures no other borrows on world data
-        unsafe { self.as_unsafe_world_cell().get_entity(entity)?.get_mut() }
+        self.get_entity_mut(entity).ok()?.into_mut()
     }
 
     /// Despawns the given `entity`, if it exists. This will also remove all of the entity's
@@ -3506,7 +3507,7 @@ impl World {
         unsafe {
             self.as_unsafe_world_cell_readonly()
                 .get_entity(entity)?
-                .get_by_id(component_id)
+                .get_by_id(Global, component_id)
         }
     }
 
@@ -3527,7 +3528,7 @@ impl World {
         unsafe {
             self.as_unsafe_world_cell()
                 .get_entity(entity)?
-                .get_mut_by_id(component_id)
+                .get_mut_by_id(Global, component_id)
                 .ok()
         }
     }

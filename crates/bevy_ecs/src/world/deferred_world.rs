@@ -11,7 +11,7 @@ use crate::{
     query::{QueryData, QueryFilter},
     system::{Commands, Query, Resource},
     traversal::Traversal,
-    world::{error::EntityFetchError, WorldEntityFetch},
+    world::{error::EntityFetchError, EntityRef, WorldEntityFetch},
 };
 
 use super::{unsafe_world_cell::UnsafeWorldCell, Mut, World};
@@ -75,11 +75,7 @@ impl<'w> DeferredWorld<'w> {
         &mut self,
         entity: Entity,
     ) -> Option<Mut<T>> {
-        // SAFETY:
-        // - `as_unsafe_world_cell` is the only thing that is borrowing world
-        // - `as_unsafe_world_cell` provides mutable permission to everything
-        // - `&mut self` ensures no other borrows on world data
-        unsafe { self.world.get_entity(entity)?.get_mut() }
+        self.get_entity_mut(entity).ok()?.into_mut()
     }
 
     /// Returns [`EntityMut`]s that expose read and write operations for the
@@ -403,13 +399,10 @@ impl<'w> DeferredWorld<'w> {
         entity: Entity,
         component_id: ComponentId,
     ) -> Option<MutUntyped<'_>> {
-        // SAFETY: &mut self ensure that there are no outstanding accesses to the resource
-        unsafe {
-            self.world
-                .get_entity(entity)?
-                .get_mut_by_id(component_id)
-                .ok()
-        }
+        self.get_entity_mut(entity)
+            .ok()?
+            .into_mut_by_id(component_id)
+            .ok()
     }
 
     /// Triggers all `on_add` hooks for [`ComponentId`] in target.
@@ -551,7 +544,7 @@ impl<'w> DeferredWorld<'w> {
             if let Some(traverse_to) = self
                 .get_entity(target)
                 .ok()
-                .and_then(|entity| entity.get_components::<T>())
+                .and_then(EntityRef::try_into_components::<T>)
                 .and_then(|item| T::traverse(item, data))
             {
                 target = traverse_to;

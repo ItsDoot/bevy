@@ -411,7 +411,7 @@ mod tests {
         fn get_gathered(app: &App, entity: Entity) -> &str {
             app.world()
                 .entity(entity)
-                .get::<GatherKeyboardEvents>()
+                .into_borrow::<GatherKeyboardEvents>()
                 .unwrap()
                 .0
                 .as_str()

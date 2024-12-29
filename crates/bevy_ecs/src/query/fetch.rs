@@ -8,7 +8,7 @@ use crate::{
     storage::{ComponentSparseSet, Table, TableRow},
     world::{
         unsafe_world_cell::UnsafeWorldCell, EntityMut, EntityMutExcept, EntityRef, EntityRefExcept,
-        FilteredEntityMut, FilteredEntityRef, Mut, Ref, World,
+        Exclusive, FilteredEntityMut, FilteredEntityRef, Full, Mut, Ref, Shared, World,
     },
 };
 use bevy_ptr::{ThinSlicePtr, UnsafeCellDeref};
@@ -488,7 +488,7 @@ unsafe impl<'a> WorldQuery for EntityRef<'a> {
         // SAFETY: `fetch` must be called with an entity that exists in the world
         let cell = unsafe { world.get_entity(entity).debug_checked_unwrap() };
         // SAFETY: Read-only access to every component has been registered.
-        unsafe { EntityRef::new(cell) }
+        unsafe { EntityRef::new(cell, Full, Shared) }
     }
 
     fn update_component_access(_state: &Self::State, access: &mut FilteredAccess<ComponentId>) {
@@ -568,7 +568,7 @@ unsafe impl<'a> WorldQuery for EntityMut<'a> {
         // SAFETY: `fetch` must be called with an entity that exists in the world
         let cell = unsafe { world.get_entity(entity).debug_checked_unwrap() };
         // SAFETY: mutable access to every component has been registered.
-        unsafe { EntityMut::new(cell) }
+        unsafe { EntityMut::new(cell, Full, Exclusive) }
     }
 
     fn update_component_access(_state: &Self::State, access: &mut FilteredAccess<ComponentId>) {

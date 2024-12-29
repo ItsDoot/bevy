@@ -315,7 +315,7 @@ mod tests {
             assert_eq!(comp_rfoo_reflected.0, 42);
             comp_rfoo_reflected.0 = 1337;
 
-            let rfoo_ref = world.entity(entity_with_rfoo).get_ref::<RFoo>().unwrap();
+            let rfoo_ref = world.entity(entity_with_rfoo).into_ref::<RFoo>().unwrap();
             assert!(rfoo_ref.is_changed());
             assert_eq!(rfoo_ref.0, 1337);
         }

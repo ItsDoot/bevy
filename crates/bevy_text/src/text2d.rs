@@ -417,7 +417,7 @@ mod tests {
             .world()
             .get_entity(entity)
             .expect("Could not find entity")
-            .get::<Aabb>()
+            .into_borrow::<Aabb>()
             .expect("Text should have an AABB");
 
         // Text2D AABB does not have a depth.
