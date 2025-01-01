@@ -93,9 +93,11 @@ pub type FilteredEntityRef<'w> = EntityRef<'w, Partial>;
 
 impl<'w, S: Scope> EntityRef<'w, S> {
     /// # Safety
-    /// - `cell` must have permission to read every component of the entity.
-    /// - No mutable accesses to any of the entity's components may exist
-    ///   at the same time as the returned [`EntityRef`].
+    ///
+    /// - The `cell` must have permission to access every component of the
+    ///   entity immutably as defined by the `scope`.
+    /// - No mutable accesses to any of the entity's components allowed by the
+    ///   `scope` may exist at the same time as the returned [`EntityRef`].
     #[inline]
     pub(crate) unsafe fn new(cell: UnsafeEntityCell<'w>, scope: S) -> Self {
         Self { cell, scope }
@@ -325,7 +327,7 @@ impl<'w, S: Scope> EntityRef<'w, S> {
         // SAFETY:
         // - Construction of this type guarantees the scope matches the permission of the cell.
         // - `&self` implies no mutable access for duration of returned value.
-        unsafe { component_ids.fetch_ref(self.cell, Global) }
+        unsafe { component_ids.fetch_ref(self.cell, Full) }
     }
 
     /// Returns read-only components for the current entity that match the query `Q`.
@@ -353,53 +355,64 @@ impl<'w, S: Scope> EntityRef<'w, S> {
     }
 }
 
-impl<'w, S: Scope + From<Global>> From<EntityWorldMut<'w>> for EntityRef<'w, S> {
+// Global Mut -> Full Ref
+impl<'w> From<EntityWorldMut<'w>> for EntityRef<'w> {
     fn from(entity: EntityWorldMut<'w>) -> Self {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe { EntityRef::new(entity.into_unsafe_entity_cell(), S::from(Global)) }
+        // SAFETY: Global scope contains all components in Full scope.
+        unsafe { EntityRef::new(entity.into_unsafe_entity_cell(), Full) }
     }
 }
 
-impl<'a, S: Scope + From<Global>> From<&'a EntityWorldMut<'_>> for EntityRef<'a, S> {
+// &Global Mut -> Full Ref
+impl<'a> From<&'a EntityWorldMut<'_>> for EntityRef<'a> {
     fn from(entity: &'a EntityWorldMut<'_>) -> Self {
-        // SAFETY:
-        // - `EntityWorldMut` guarantees exclusive access to the entire world.
-        // - `&value` ensures no mutable accesses are active.
-        unsafe { EntityRef::new(entity.as_unsafe_entity_cell_readonly(), S::from(Global)) }
+        // SAFETY: Global scope contains all components in Full scope.
+        unsafe { EntityRef::new(entity.as_unsafe_entity_cell_readonly(), Full) }
     }
 }
 
-impl<'w, AS: Scope + Into<BS>, BS: Scope> From<EntityMut<'w, AS>> for EntityRef<'w, BS> {
-    fn from(entity: EntityMut<'w, AS>) -> Self {
-        // SAFETY:
-        // - `EntityMut` guarantees exclusive access to all of the entity's components.
-        unsafe { EntityRef::new(entity.cell, entity.scope.into()) }
+// Full Mut -> Full Ref
+impl<'w> From<EntityMut<'w>> for EntityRef<'w> {
+    fn from(entity: EntityMut<'w>) -> Self {
+        entity.into_readonly()
     }
 }
 
-impl<'a, S: Scope> From<&'a EntityMut<'_, S>> for EntityRef<'a, S::AsRef<'a>> {
-    fn from(entity: &'a EntityMut<'_, S>) -> Self {
-        // SAFETY:
-        // - `EntityMut` guarantees exclusive access to all of the entity's components.
-        // - `&value` ensures there are no mutable accesses.
-        unsafe { EntityRef::new(entity.cell, entity.scope.as_ref()) }
+// &Full Mut -> Full Ref
+impl<'a> From<&'a EntityMut<'_>> for EntityRef<'a> {
+    fn from(entity: &'a EntityMut<'_>) -> Self {
+        entity.as_readonly()
     }
 }
 
-impl<'a> From<&'a FilteredEntityMut<'_>> for FilteredEntityRef<'a> {
-    #[inline]
-    fn from(entity: &'a FilteredEntityMut<'_>) -> Self {
-        // SAFETY:
-        // - `FilteredEntityMut` guarantees exclusive access to all components in the new `FilteredEntityRef`.
-        unsafe { FilteredEntityRef::new(entity.cell, entity.scope.clone()) }
+// Global Mut -> Partial Ref
+impl<'w> From<EntityWorldMut<'w>> for FilteredEntityRef<'w> {
+    fn from(value: EntityWorldMut<'w>) -> Self {
+        // SAFETY: Global scope contains all components in Partial scope.
+        unsafe {
+            let mut access = Access::default();
+            access.read_all();
+            FilteredEntityRef::new(value.into_unsafe_entity_cell(), Partial(access))
+        }
     }
 }
 
-impl<'a> From<EntityRef<'a>> for FilteredEntityRef<'a> {
-    fn from(entity: EntityRef<'a>) -> Self {
-        // SAFETY:
-        // - `EntityRef` guarantees exclusive access to all components in the new `FilteredEntityRef`.
+// &Global Mut -> Partial Ref
+impl<'a> From<&'a EntityWorldMut<'_>> for FilteredEntityRef<'a> {
+    fn from(value: &'a EntityWorldMut<'_>) -> Self {
+        // SAFETY: Global scope contains all components in Partial scope.
+        unsafe {
+            let mut access = Access::default();
+            access.read_all();
+            FilteredEntityRef::new(value.as_unsafe_entity_cell_readonly(), Partial(access))
+        }
+    }
+}
+
+// Full Ref -> Partial Ref
+impl<'w> From<EntityRef<'w>> for FilteredEntityRef<'w> {
+    fn from(entity: EntityRef<'w>) -> Self {
+        // SAFETY: Full scope contains all components in Partial scope.
         unsafe {
             let mut access = Access::default();
             access.read_all();
@@ -408,10 +421,10 @@ impl<'a> From<EntityRef<'a>> for FilteredEntityRef<'a> {
     }
 }
 
+// &Full Ref -> Partial Ref
 impl<'a> From<&'a EntityRef<'_>> for FilteredEntityRef<'a> {
     fn from(entity: &'a EntityRef<'_>) -> Self {
-        // SAFETY:
-        // - `EntityRef` guarantees exclusive access to all components in the new `FilteredEntityRef`.
+        // SAFETY: Full scope contains all components in Partial scope.
         unsafe {
             let mut access = Access::default();
             access.read_all();
@@ -420,6 +433,7 @@ impl<'a> From<&'a EntityRef<'_>> for FilteredEntityRef<'a> {
     }
 }
 
+// &Full Mut -> Partial Ref
 impl<'a> From<&'a EntityMut<'_>> for FilteredEntityRef<'a> {
     fn from(entity: &'a EntityMut<'_>) -> Self {
         // SAFETY:
@@ -432,6 +446,42 @@ impl<'a> From<&'a EntityMut<'_>> for FilteredEntityRef<'a> {
     }
 }
 
+// Global Mut -> Except Ref
+impl<'w, B: Bundle> From<EntityWorldMut<'w>> for EntityRefExcept<'w, B> {
+    fn from(value: EntityWorldMut<'w>) -> Self {
+        // SAFETY: Global scope contains all components in Except scope.
+        unsafe { EntityRefExcept::new(value.into_unsafe_entity_cell(), Except::<B>::default()) }
+    }
+}
+
+// &Global Mut -> Except Ref
+impl<'a, B: Bundle> From<&'a EntityWorldMut<'_>> for EntityRefExcept<'a, B> {
+    fn from(value: &'a EntityWorldMut<'_>) -> Self {
+        // SAFETY: Global scope contains all components in Except scope.
+        unsafe {
+            EntityRefExcept::new(
+                value.as_unsafe_entity_cell_readonly(),
+                Except::<B>::default(),
+            )
+        }
+    }
+}
+
+impl<'a> From<&'a FilteredEntityRef<'_>> for FilteredEntityRef<'a> {
+    fn from(value: &'a FilteredEntityRef<'_>) -> Self {
+        // SAFETY: Scope is left unchanged.
+        unsafe { FilteredEntityRef::new(value.cell, value.scope.clone()) }
+    }
+}
+
+impl<'a> From<&'a FilteredEntityMut<'_>> for FilteredEntityRef<'a> {
+    #[inline]
+    fn from(entity: &'a FilteredEntityMut<'_>) -> Self {
+        entity.as_readonly_cloned()
+    }
+}
+
+// SAFETY: Partial -> Full (checked)
 impl<'a> TryFrom<FilteredEntityRef<'a>> for EntityRef<'a> {
     type Error = TryFromFilteredError;
 
@@ -439,12 +489,13 @@ impl<'a> TryFrom<FilteredEntityRef<'a>> for EntityRef<'a> {
         if !entity.scope.0.has_read_all() {
             Err(TryFromFilteredError::MissingReadAllAccess)
         } else {
-            // SAFETY: check above guarantees read-only access to all components of the entity.
+            // SAFETY: Check above guarantees Partial scope contains all components.
             Ok(unsafe { EntityRef::new(entity.cell, Full) })
         }
     }
 }
 
+// SAFETY: Partial -> Full (checked)
 impl<'a> TryFrom<&'a FilteredEntityRef<'_>> for EntityRef<'a> {
     type Error = TryFromFilteredError;
 
@@ -452,12 +503,13 @@ impl<'a> TryFrom<&'a FilteredEntityRef<'_>> for EntityRef<'a> {
         if !entity.scope.0.has_read_all() {
             Err(TryFromFilteredError::MissingReadAllAccess)
         } else {
-            // SAFETY: check above guarantees read-only access to all components of the entity.
+            // SAFETY: Check above guarantees Partial scope contains all components.
             Ok(unsafe { EntityRef::new(entity.cell, Full) })
         }
     }
 }
 
+// SAFETY: Partial -> Full (checked)
 impl<'a> TryFrom<FilteredEntityMut<'a>> for EntityRef<'a> {
     type Error = TryFromFilteredError;
 
@@ -465,12 +517,13 @@ impl<'a> TryFrom<FilteredEntityMut<'a>> for EntityRef<'a> {
         if !entity.scope.0.has_read_all() {
             Err(TryFromFilteredError::MissingReadAllAccess)
         } else {
-            // SAFETY: check above guarantees read-only access to all components of the entity.
+            // SAFETY: Check above guarantees Partial scope contains all components.
             Ok(unsafe { EntityRef::new(entity.cell, Full) })
         }
     }
 }
 
+// SAFETY: Partial -> Full (checked)
 impl<'a> TryFrom<&'a FilteredEntityMut<'_>> for EntityRef<'a> {
     type Error = TryFromFilteredError;
 
@@ -478,7 +531,7 @@ impl<'a> TryFrom<&'a FilteredEntityMut<'_>> for EntityRef<'a> {
         if !entity.scope.0.has_read_all() {
             Err(TryFromFilteredError::MissingReadAllAccess)
         } else {
-            // SAFETY: check above guarantees read-only access to all components of the entity.
+            // SAFETY: Check above guarantees Partial scope contains all components.
             Ok(unsafe { EntityRef::new(entity.cell, Full) })
         }
     }
@@ -590,9 +643,10 @@ pub type FilteredEntityMut<'w> = EntityMut<'w, Partial>;
 
 impl<'w, S: Scope> EntityMut<'w, S> {
     /// # Safety
-    /// - `cell` must have permission to mutate every component of the entity.
-    /// - No accesses to any of the entity's components may exist
-    ///   at the same time as the returned [`EntityMut`].
+    /// - The `cell` must have permission to access every component of the
+    ///   entity immutably or mutably as defined by the `scope`.
+    /// - No accesses to any of the entity's components allowed by the `scope`
+    ///   may exist at the same time as the returned [`EntityMut`].
     pub(crate) unsafe fn new(cell: UnsafeEntityCell<'w>, scope: S) -> Self {
         Self { cell, scope }
     }
@@ -606,13 +660,34 @@ impl<'w, S: Scope> EntityMut<'w, S> {
 
     /// Gets read-only access to the entity's components within the same scope `S`.
     pub fn as_readonly(&self) -> EntityRef<'_, S::AsRef<'_>> {
-        EntityRef::from(self)
+        // SAFETY:
+        // - Scope is left unchanged.
+        // - `&self` implies no mutable access to the entity's components within
+        //   the same scope `S` for the duration of the returned value.
+        unsafe { EntityRef::new(self.cell, self.scope.as_ref()) }
+    }
+
+    /// Gets read-only access to the entity's components within the same scope `S`.
+    /// The [`Scope`] is cloned to allow the same type to be used.
+    pub fn as_readonly_cloned(&self) -> EntityRef<'_, S>
+    where
+        S: Clone,
+    {
+        // SAFETY:
+        // - Scope is left unchanged.
+        // - `&self` implies no mutable access to the entity's components within
+        //   the same scope `S` for the duration of the returned value.
+        unsafe { EntityRef::new(self.cell, self.scope.clone()) }
     }
 
     /// Consumes `self` and returns read-only access to the entity's components
     /// within the same scope `S`.
     pub fn into_readonly(self) -> EntityRef<'w, S> {
-        EntityRef::from(self)
+        // SAFETY:
+        // - Scope is left unchanged.
+        // - Consuming `self` ensures no other access to the entity's components
+        //   within the same scope `S` exists.
+        unsafe { EntityRef::new(self.cell, self.scope) }
     }
 
     /// Returns the [ID](Entity) of the current entity.
@@ -965,7 +1040,7 @@ impl<'w, S: Scope> EntityMut<'w, S> {
         // SAFETY:
         // - Construction of this type guarantees the scope matches the permission of the cell.
         // - `&mut self` implies exclusive access for duration of returned value.
-        unsafe { component_ids.fetch_mut(self.cell, Global) }
+        unsafe { component_ids.fetch_mut(self.cell, Full) }
     }
 
     /// Returns [untyped mutable reference](MutUntyped) to component for
@@ -993,7 +1068,7 @@ impl<'w, S: Scope> EntityMut<'w, S> {
         // SAFETY:
         // - The caller must ensure simultaneous access is limited
         // - to components that are mutually independent.
-        unsafe { component_ids.fetch_mut(self.cell, Global) }
+        unsafe { component_ids.fetch_mut(self.cell, Full) }
     }
 
     /// Consumes `self` and returns [untyped mutable reference(s)](MutUntyped)
@@ -1026,7 +1101,7 @@ impl<'w, S: Scope> EntityMut<'w, S> {
         // SAFETY:
         // - consuming `self` ensures that no references exist to this entity's components.
         // - We have exclusive access to all components of this entity.
-        unsafe { component_ids.fetch_mut(self.cell, Global) }
+        unsafe { component_ids.fetch_mut(self.cell, Full) }
     }
 
     /// Returns the source code location from which this entity has been spawned.
@@ -1039,20 +1114,6 @@ impl<'w, S: Scope> EntityMut<'w, S> {
 impl<'w, S: Scope> From<&'w mut EntityMut<'_, S>> for EntityMut<'w, S::AsRef<'w>> {
     fn from(value: &'w mut EntityMut<'_, S>) -> Self {
         value.reborrow()
-    }
-}
-
-impl<'w, S: Scope + From<Global>> From<EntityWorldMut<'w>> for EntityMut<'w, S> {
-    fn from(value: EntityWorldMut<'w>) -> Self {
-        // SAFETY: `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe { EntityMut::new(value.into_unsafe_entity_cell(), S::from(Global)) }
-    }
-}
-
-impl<'a, S: Scope + From<Global>> From<&'a mut EntityWorldMut<'_>> for EntityMut<'a, S> {
-    fn from(value: &'a mut EntityWorldMut<'_>) -> Self {
-        // SAFETY: `EntityWorldMut` guarantees exclusive access to the entire world.
-        unsafe { EntityMut::new(value.as_unsafe_entity_cell(), S::from(Global)) }
     }
 }
 
@@ -3151,40 +3212,6 @@ impl Scope for Full {
     }
 }
 
-impl From<Global> for Full {
-    fn from(_: Global) -> Self {
-        Self
-    }
-}
-
-/// [`Scope`] that provides full access to the entity's components
-/// and the [`World`] that the entity is contained in.
-///
-/// See [`EntityWorldRef`] and [`EntityWorldMut`] which operate in this scope.
-#[derive(Clone, Copy)]
-pub struct Global;
-
-impl Scope for Global {
-    type AsRef<'a>
-        = Self
-    where
-        Self: 'a;
-
-    fn as_ref(&self) -> Self::AsRef<'_> {
-        *self
-    }
-
-    #[inline(always)]
-    fn can_read(&self, _components: &Components, _component: ComponentId) -> bool {
-        true
-    }
-
-    #[inline(always)]
-    fn can_write(&self, _components: &Components, _component: ComponentId) -> bool {
-        true
-    }
-}
-
 /// [`EntityPtr`] [`Scope`] that provides access to all components *except*
 /// those in the [`Bundle`] `B`.
 ///
@@ -3311,15 +3338,6 @@ impl Scope for Partial {
     }
 }
 
-impl From<Global> for Partial {
-    fn from(_: Global) -> Self {
-        let mut access = Access::default();
-        access.read_all();
-        access.write_all();
-        Self(access)
-    }
-}
-
 impl From<Full> for Partial {
     fn from(_: Full) -> Self {
         let mut access = Access::default();
@@ -3333,7 +3351,6 @@ mod sealed {
     pub trait Scope {}
     impl<S: Scope> Scope for &S {}
     impl Scope for super::Full {}
-    impl Scope for super::Global {}
     impl<B: super::Bundle> Scope for super::Except<B> {}
     impl<B: super::Bundle> Scope for super::Only<B> {}
     impl Scope for super::Partial {}

@@ -23,8 +23,8 @@ pub use deferred_world::DeferredWorld;
 pub use entity_fetch::WorldEntityFetch;
 pub use entity_ref::{
     DynamicComponentFetch, EntityMut, EntityMutExcept, EntityRef, EntityRefExcept, EntityWorldMut,
-    Entry, Except, FilteredEntityMut, FilteredEntityRef, Full, Global, OccupiedEntry, Only,
-    Partial, Scope, TryFromFilteredError, VacantEntry,
+    Entry, Except, FilteredEntityMut, FilteredEntityRef, Full, OccupiedEntry, Only, Partial, Scope,
+    TryFromFilteredError, VacantEntry,
 };
 pub use filtered_resource::*;
 pub use identifier::WorldId;
