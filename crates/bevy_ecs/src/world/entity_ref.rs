@@ -2987,6 +2987,15 @@ impl<'w, 'a, T: Component> VacantEntry<'w, 'a, T> {
 /// ```
 pub type FilteredEntityRef<'w> = EntityRef<'w, Partial>;
 
+impl<'w> FilteredEntityRef<'w> {
+    /// Returns a reference to the underlying [`Access`].
+    #[deprecated(since = "0.16.0", note = "Use `entity.scope()` instead.")]
+    #[inline]
+    pub fn access(&self) -> &Access<ComponentId> {
+        &self.scope.0
+    }
+}
+
 impl<'a> From<&'a FilteredEntityMut<'_>> for FilteredEntityRef<'a> {
     #[inline]
     fn from(entity: &'a FilteredEntityMut<'_>) -> Self {
@@ -3107,6 +3116,15 @@ impl<'a> From<&'a EntityWorldMut<'_>> for FilteredEntityRef<'a> {
 /// assert!(filtered_entity.get_mut::<A>().is_none());
 /// ```
 pub type FilteredEntityMut<'w> = EntityMut<'w, Partial>;
+
+impl<'w> FilteredEntityMut<'w> {
+    /// Returns a reference to the underlying [`Access`].
+    #[deprecated(since = "0.16.0", note = "Use `entity.scope()` instead.")]
+    #[inline]
+    pub fn access(&self) -> &Access<ComponentId> {
+        &self.scope.0
+    }
+}
 
 impl<'a> From<EntityMut<'a>> for FilteredEntityMut<'a> {
     fn from(entity: EntityMut<'a>) -> Self {
