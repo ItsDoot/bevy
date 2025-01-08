@@ -15,7 +15,7 @@ use crate::{
     removal_detection::RemovedComponentEvents,
     storage::{ComponentSparseSet, Storages, Table},
     system::Resource,
-    world::RawCommandQueue,
+    world::{RawCommandQueue, Scope},
 };
 use bevy_ptr::Ptr;
 #[cfg(feature = "track_location")]
@@ -736,11 +736,17 @@ impl<'w> UnsafeEntityCell<'w> {
 
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component immutably
     /// - no other mutable references to the component exist at the same time
     #[inline]
-    pub unsafe fn get<T: Component>(self) -> Option<&'w T> {
+    pub unsafe fn get<T: Component>(self, scope: impl Scope) -> Option<&'w T> {
         let component_id = self.world.components().get_id(TypeId::of::<T>())?;
+
+        if !scope.can_read(self.world.components(), component_id) {
+            return None;
+        }
+
         // SAFETY:
         // - `storage_type` is correct (T component_id + T::STORAGE_TYPE)
         // - `location` is valid
@@ -760,13 +766,18 @@ impl<'w> UnsafeEntityCell<'w> {
 
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component immutably
     /// - no other mutable references to the component exist at the same time
     #[inline]
-    pub unsafe fn get_ref<T: Component>(self) -> Option<Ref<'w, T>> {
+    pub unsafe fn get_ref<T: Component>(self, scope: impl Scope) -> Option<Ref<'w, T>> {
         let last_change_tick = self.world.last_change_tick();
         let change_tick = self.world.change_tick();
         let component_id = self.world.components().get_id(TypeId::of::<T>())?;
+
+        if !scope.can_read(self.world.components(), component_id) {
+            return None;
+        }
 
         // SAFETY:
         // - `storage_type` is correct (T component_id + T::STORAGE_TYPE)
@@ -795,11 +806,19 @@ impl<'w> UnsafeEntityCell<'w> {
     ///
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component immutably
     /// - no other mutable references to the component exist at the same time
     #[inline]
-    pub unsafe fn get_change_ticks<T: Component>(self) -> Option<ComponentTicks> {
+    pub unsafe fn get_change_ticks<T: Component>(
+        self,
+        scope: impl Scope,
+    ) -> Option<ComponentTicks> {
         let component_id = self.world.components().get_id(TypeId::of::<T>())?;
+
+        if !scope.can_read(self.world.components(), component_id) {
+            return None;
+        }
 
         // SAFETY:
         // - entity location is valid
@@ -824,13 +843,19 @@ impl<'w> UnsafeEntityCell<'w> {
     ///
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component immutably
     /// - no other mutable references to the component exist at the same time
     #[inline]
     pub unsafe fn get_change_ticks_by_id(
         &self,
+        scope: impl Scope,
         component_id: ComponentId,
     ) -> Option<ComponentTicks> {
+        if !scope.can_read(self.world.components(), component_id) {
+            return None;
+        }
+
         let info = self.world.components().get_info(component_id)?;
         // SAFETY:
         // - entity location and entity is valid
@@ -849,26 +874,35 @@ impl<'w> UnsafeEntityCell<'w> {
 
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component mutably
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component mutably
     /// - no other references to the component exist at the same time
     #[inline]
-    pub unsafe fn get_mut<T: Component<Mutability = Mutable>>(self) -> Option<Mut<'w, T>> {
+    pub unsafe fn get_mut<T: Component<Mutability = Mutable>>(
+        self,
+        scope: impl Scope,
+    ) -> Option<Mut<'w, T>> {
         // SAFETY:
         // - trait bound `T: Component<Mutability = Mutable>` ensures component is mutable
         // - same safety requirements
-        unsafe { self.get_mut_assume_mutable() }
+        unsafe { self.get_mut_assume_mutable(scope) }
     }
 
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component mutably
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component mutably
     /// - no other references to the component exist at the same time
     /// - the component `T` is mutable
     #[inline]
-    pub unsafe fn get_mut_assume_mutable<T: Component>(self) -> Option<Mut<'w, T>> {
+    pub unsafe fn get_mut_assume_mutable<T: Component>(
+        self,
+        scope: impl Scope,
+    ) -> Option<Mut<'w, T>> {
         // SAFETY: same safety requirements
         unsafe {
             self.get_mut_using_ticks_assume_mutable(
+                scope,
                 self.world.last_change_tick(),
                 self.world.change_tick(),
             )
@@ -877,16 +911,22 @@ impl<'w> UnsafeEntityCell<'w> {
 
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component mutably
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component mutably
     /// - no other references to the component exist at the same time
     /// - The component `T` is mutable
     #[inline]
     pub(crate) unsafe fn get_mut_using_ticks_assume_mutable<T: Component>(
         &self,
+        scope: impl Scope,
         last_change_tick: Tick,
         change_tick: Tick,
     ) -> Option<Mut<'w, T>> {
         let component_id = self.world.components().get_id(TypeId::of::<T>())?;
+
+        if !scope.can_write(self.world.components(), component_id) {
+            return None;
+        }
 
         // SAFETY:
         // - `storage_type` is correct
@@ -915,9 +955,13 @@ impl<'w> UnsafeEntityCell<'w> {
     ///
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the queried data immutably
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the queried components immutably
     /// - no mutable references to the queried data exist at the same time
-    pub(crate) unsafe fn get_components<Q: ReadOnlyQueryData>(&self) -> Option<Q::Item<'w>> {
+    pub(crate) unsafe fn get_components<Q: ReadOnlyQueryData>(
+        &self,
+        scope: impl Scope,
+    ) -> Option<Q::Item<'w>> {
         // SAFETY: World is only used to access query data and initialize query state
         let state = unsafe {
             let world = self.world().world();
@@ -931,7 +975,9 @@ impl<'w> UnsafeEntityCell<'w> {
                 .get(location.archetype_id)
                 .debug_checked_unwrap()
         };
-        if Q::matches_component_set(&state, &|id| archetype.contains(id)) {
+        if Q::matches_component_set(&state, &|id| {
+            scope.can_read(self.world.components(), id) && archetype.contains(id)
+        }) {
             // SAFETY: state was initialized above using the world passed into this function
             let mut fetch = unsafe {
                 Q::init_fetch(
@@ -970,10 +1016,15 @@ impl<'w> UnsafeEntityCell<'w> {
     ///
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component immutably
     /// - no other mutable references to the component exist at the same time
     #[inline]
-    pub unsafe fn get_by_id(self, component_id: ComponentId) -> Option<Ptr<'w>> {
+    pub unsafe fn get_by_id(self, scope: impl Scope, component_id: ComponentId) -> Option<Ptr<'w>> {
+        if !scope.can_read(self.world.components(), component_id) {
+            return None;
+        }
+
         let info = self.world.components().get_info(component_id)?;
         // SAFETY: entity_location is valid, component_id is valid as checked by the line above
         unsafe {
@@ -995,13 +1046,19 @@ impl<'w> UnsafeEntityCell<'w> {
     ///
     /// # Safety
     /// It is the callers responsibility to ensure that
-    /// - the [`UnsafeEntityCell`] has permission to access the component mutably
+    /// - the provided [`Scope`] must match the permission of the
+    ///   [`UnsafeEntityCell`] to access the component mutably
     /// - no other references to the component exist at the same time
     #[inline]
     pub unsafe fn get_mut_by_id(
         self,
+        scope: impl Scope,
         component_id: ComponentId,
     ) -> Result<MutUntyped<'w>, GetEntityMutByIdError> {
+        if !scope.can_write(self.world.components(), component_id) {
+            return Err(GetEntityMutByIdError::ComponentNotFound);
+        }
+
         let info = self
             .world
             .components()
