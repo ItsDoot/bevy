@@ -46,6 +46,7 @@ use crate::{
     },
     entity_disabling::DefaultQueryFilters,
     event::{Event, EventId, Events, SendBatchIds},
+    index::{ContainerIndex, ContainerIndexMut},
     observer::Observers,
     query::{DebugCheckedUnwrap, QueryData, QueryFilter, QueryState},
     removal_detection::RemovedComponentEvents,
@@ -63,7 +64,7 @@ use crate::{
 use alloc::{boxed::Box, vec::Vec};
 use bevy_platform_support::sync::atomic::{AtomicU32, Ordering};
 use bevy_ptr::{OwningPtr, Ptr, UnsafeCellDeref};
-use core::{any::TypeId, fmt};
+use core::{any::TypeId, error::Error, fmt};
 use log::warn;
 use unsafe_world_cell::{UnsafeEntityCell, UnsafeWorldCell};
 
@@ -685,20 +686,17 @@ impl World {
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
     #[track_caller]
-    pub fn entity<F: WorldEntityFetch>(&self, entities: F) -> F::Ref<'_> {
+    pub fn entity<I: ContainerIndex<Self>>(&self, entities: I) -> I::Output<'_> {
         #[inline(never)]
         #[cold]
         #[track_caller]
-        fn panic_no_entity(world: &World, entity: Entity) -> ! {
-            panic!(
-                "Entity {entity} {}",
-                world.entities.entity_does_not_exist_error_details(entity)
-            );
+        fn panic_on_err(e: impl Error) -> ! {
+            panic!("{e}");
         }
 
         match self.get_entity(entities) {
             Ok(fetched) => fetched,
-            Err(error) => panic_no_entity(self, error.entity),
+            Err(error) => panic_on_err(error),
         }
     }
 
@@ -821,11 +819,11 @@ impl World {
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
     #[track_caller]
-    pub fn entity_mut<F: WorldEntityFetch>(&mut self, entities: F) -> F::Mut<'_> {
+    pub fn entity_mut<I: ContainerIndexMut<Self>>(&mut self, entities: I) -> I::Output<'_> {
         #[inline(never)]
         #[cold]
         #[track_caller]
-        fn panic_on_err(e: EntityMutableFetchError) -> ! {
+        fn panic_on_err(e: impl Error) -> ! {
             panic!("{e}");
         }
 
@@ -879,13 +877,13 @@ impl World {
     ///
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
-    pub fn get_entity<F: WorldEntityFetch>(
+    pub fn get_entity<I: ContainerIndex<Self>>(
         &self,
-        entities: F,
-    ) -> Result<F::Ref<'_>, EntityDoesNotExistError> {
+        entities: I,
+    ) -> Result<I::Output<'_>, EntityDoesNotExistError> {
         let cell = self.as_unsafe_world_cell_readonly();
         // SAFETY: `&self` gives read access to the entire world, and prevents mutable access.
-        unsafe { entities.fetch_ref(cell) }
+        unsafe { entities.get(cell) }
     }
 
     /// Returns [`EntityMut`]s that expose read and write operations for the
@@ -920,14 +918,14 @@ impl World {
     ///
     /// [`EntityHashSet`]: crate::entity::hash_set::EntityHashSet
     #[inline]
-    pub fn get_entity_mut<F: WorldEntityFetch>(
+    pub fn get_entity_mut<I: ContainerIndexMut<Self>>(
         &mut self,
-        entities: F,
-    ) -> Result<F::Mut<'_>, EntityMutableFetchError> {
+        entities: I,
+    ) -> Result<I::Output<'_>, EntityMutableFetchError> {
         let cell = self.as_unsafe_world_cell();
         // SAFETY: `&mut self` gives mutable access to the entire world,
         // and prevents any other access to the world.
-        unsafe { entities.fetch_mut(cell) }
+        unsafe { entities.get_mut(cell) }
     }
 
     /// Returns an [`Entity`] iterator of current entities.

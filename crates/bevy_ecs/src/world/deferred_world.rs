@@ -6,13 +6,14 @@ use crate::{
     component::{ComponentId, HookContext, Mutable},
     entity::Entity,
     event::{Event, EventId, Events, SendBatchIds},
+    index::ContainerIndexMut,
     observer::{Observers, TriggerTargets},
     prelude::{Component, QueryState},
     query::{QueryData, QueryFilter},
     resource::Resource,
     system::{Commands, Query},
     traversal::Traversal,
-    world::{error::EntityMutableFetchError, WorldEntityFetch},
+    world::error::EntityMutableFetchError,
 };
 
 use super::{unsafe_world_cell::UnsafeWorldCell, Mut, World, ON_INSERT, ON_REPLACE};
@@ -203,14 +204,14 @@ impl<'w> DeferredWorld<'w> {
     /// [`EntityHashMap<EntityMut>`]: crate::entity::hash_map::EntityHashMap
     /// [`Vec<EntityMut>`]: alloc::vec::Vec
     #[inline]
-    pub fn get_entity_mut<F: WorldEntityFetch>(
+    pub fn get_entity_mut<I: ContainerIndexMut<Self>>(
         &mut self,
-        entities: F,
-    ) -> Result<F::DeferredMut<'_>, EntityMutableFetchError> {
+        entities: I,
+    ) -> Result<I::Output<'_>, EntityMutableFetchError> {
         let cell = self.as_unsafe_world_cell();
         // SAFETY: `&mut self` gives mutable access to the entire world,
         // and prevents any other access to the world.
-        unsafe { entities.fetch_deferred_mut(cell) }
+        unsafe { entities.get_mut(cell) }
     }
 
     /// Returns [`EntityMut`]s that expose read and write operations for the
@@ -335,7 +336,7 @@ impl<'w> DeferredWorld<'w> {
     /// [`EntityHashMap<EntityMut>`]: crate::entity::hash_map::EntityHashMap
     /// [`Vec<EntityMut>`]: alloc::vec::Vec
     #[inline]
-    pub fn entity_mut<F: WorldEntityFetch>(&mut self, entities: F) -> F::DeferredMut<'_> {
+    pub fn entity_mut<I: ContainerIndexMut<Self>>(&mut self, entities: I) -> I::Output<'_> {
         self.get_entity_mut(entities).unwrap()
     }
 
@@ -726,7 +727,7 @@ impl<'w> DeferredWorld<'w> {
     /// # Safety
     /// - must only be used to make non-structural ECS changes
     #[inline]
-    pub(crate) fn as_unsafe_world_cell(&mut self) -> UnsafeWorldCell {
+    pub(crate) fn as_unsafe_world_cell(&mut self) -> UnsafeWorldCell<'_> {
         self.world
     }
 }

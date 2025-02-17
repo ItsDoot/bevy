@@ -11,6 +11,7 @@ use crate::{
         TrustedEntityBorrow,
     },
     event::Event,
+    index::ContainerIndex,
     observer::Observer,
     query::{Access, ReadOnlyQueryData},
     removal_detection::RemovedComponentEvents,
@@ -266,12 +267,12 @@ impl<'w> EntityRef<'w> {
     /// # assert_eq!((unsafe { ptrs[&x_id].deref::<X>() }, unsafe { ptrs[&y_id].deref::<Y>() }), (&X(42), &Y(10)));
     /// ```
     #[inline]
-    pub fn get_by_id<F: DynamicComponentFetch>(
+    pub fn get_by_id<I: ContainerIndex<Self>>(
         &self,
-        component_ids: F,
-    ) -> Result<F::Ref<'w>, EntityComponentError> {
+        component_ids: I,
+    ) -> Result<I::Output<'w>, EntityComponentError> {
         // SAFETY: We have read-only access to all components of this entity.
-        unsafe { component_ids.fetch_ref(self.cell) }
+        unsafe { component_ids.get(self.cell) }
     }
 
     /// Returns read-only components for the current entity that match the query `Q`.
@@ -661,11 +662,12 @@ impl<'w> EntityMut<'w> {
     ///
     /// For examples on how to use this method, see [`EntityRef::get_by_id`].
     #[inline]
-    pub fn get_by_id<F: DynamicComponentFetch>(
+    pub fn get_by_id<I: ContainerIndex<Self>>(
         &self,
-        component_ids: F,
-    ) -> Result<F::Ref<'_>, EntityComponentError> {
-        self.as_readonly().get_by_id(component_ids)
+        component_ids: I,
+    ) -> Result<I::Output<'_>, EntityComponentError> {
+        // SAFETY: We have read-only access to all components of this entity.
+        unsafe { component_ids.get(self.cell) }
     }
 
     /// Consumes `self` and returns [untyped read-only reference(s)](Ptr) to
@@ -689,11 +691,12 @@ impl<'w> EntityMut<'w> {
     ///
     /// For examples on how to use this method, see [`EntityRef::get_by_id`].
     #[inline]
-    pub fn into_borrow_by_id<F: DynamicComponentFetch>(
+    pub fn into_borrow_by_id<I: ContainerIndex<Self>>(
         self,
-        component_ids: F,
-    ) -> Result<F::Ref<'w>, EntityComponentError> {
-        self.into_readonly().get_by_id(component_ids)
+        component_ids: I,
+    ) -> Result<I::Output<'w>, EntityComponentError> {
+        // SAFETY: We have read-only access to all components of this entity.
+        unsafe { component_ids.get(self.cell) }
     }
 
     /// Returns [untyped mutable reference(s)](MutUntyped) to component(s) for
@@ -1013,7 +1016,7 @@ impl<'w> EntityWorldMut<'w> {
         }
     }
 
-    fn as_unsafe_entity_cell_readonly(&self) -> UnsafeEntityCell<'_> {
+    pub(crate) fn as_unsafe_entity_cell_readonly(&self) -> UnsafeEntityCell<'_> {
         self.assert_not_despawned();
         UnsafeEntityCell::new(
             self.world.as_unsafe_world_cell_readonly(),
@@ -1021,7 +1024,8 @@ impl<'w> EntityWorldMut<'w> {
             self.location,
         )
     }
-    fn as_unsafe_entity_cell(&mut self) -> UnsafeEntityCell<'_> {
+
+    pub(crate) fn as_unsafe_entity_cell(&mut self) -> UnsafeEntityCell<'_> {
         self.assert_not_despawned();
         UnsafeEntityCell::new(
             self.world.as_unsafe_world_cell(),
@@ -1029,6 +1033,7 @@ impl<'w> EntityWorldMut<'w> {
             self.location,
         )
     }
+
     fn into_unsafe_entity_cell(self) -> UnsafeEntityCell<'w> {
         self.assert_not_despawned();
         UnsafeEntityCell::new(
@@ -1411,11 +1416,12 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// If the entity has been despawned while this `EntityWorldMut` is still alive.
     #[inline]
-    pub fn get_by_id<F: DynamicComponentFetch>(
+    pub fn get_by_id<I: ContainerIndex<Self>>(
         &self,
-        component_ids: F,
-    ) -> Result<F::Ref<'_>, EntityComponentError> {
-        self.as_readonly().get_by_id(component_ids)
+        component_ids: I,
+    ) -> Result<I::Output<'_>, EntityComponentError> {
+        // SAFETY: We have read-only access to all components of this entity.
+        unsafe { component_ids.get(self.as_unsafe_entity_cell_readonly()) }
     }
 
     /// Consumes `self` and returns [untyped read-only reference(s)](Ptr) to
@@ -1443,11 +1449,12 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// If the entity has been despawned while this `EntityWorldMut` is still alive.
     #[inline]
-    pub fn into_borrow_by_id<F: DynamicComponentFetch>(
+    pub fn into_borrow_by_id<I: ContainerIndex<Self>>(
         self,
-        component_ids: F,
-    ) -> Result<F::Ref<'w>, EntityComponentError> {
-        self.into_readonly().get_by_id(component_ids)
+        component_ids: I,
+    ) -> Result<I::Output<'w>, EntityComponentError> {
+        // SAFETY: We have read-only access to all components of this entity.
+        unsafe { component_ids.get(self.into_unsafe_entity_cell()) }
     }
 
     /// Returns [untyped mutable reference(s)](MutUntyped) to component(s) for
