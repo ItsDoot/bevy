@@ -1,7 +1,7 @@
 use crate::{
     batching::BatchingStrategy,
     component::Tick,
-    entity::{Entity, EntityBorrow, EntitySet},
+    entity::{hash_map::EntityHashMap, hash_set::EntityHashSet, Entity, EntityBorrow, EntitySet},
     query::{
         QueryCombinationIter, QueryData, QueryEntityError, QueryFilter, QueryIter, QueryManyIter,
         QueryManyUniqueIter, QueryParIter, QueryParManyIter, QueryParManyUniqueIter,
@@ -11,6 +11,7 @@ use crate::{
 };
 use core::{
     marker::PhantomData,
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
 };
 
@@ -1204,8 +1205,11 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get_mut`](Self::get_mut) to get a mutable query item.
     #[inline]
-    pub fn get(&self, entity: Entity) -> Result<ROQueryItem<'_, D>, QueryEntityError> {
-        self.as_readonly().get_inner(entity)
+    pub fn get<E: QueryEntityFetch<D::ReadOnly, F>>(
+        &self,
+        entities: E,
+    ) -> Result<E::ROItem<'_>, QueryEntityError> {
+        entities.fetch_readonly(self.as_readonly())
     }
 
     /// Returns the read-only query items for the given array of [`Entity`].
@@ -1219,13 +1223,15 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many_mut`](Self::get_many_mut) to get mutable query items.
     /// - [`many`](Self::many) for the panicking version.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `get` instead, which now supports arrays."
+    )]
     pub fn get_many<const N: usize>(
         &self,
         entities: [Entity; N],
     ) -> Result<[ROQueryItem<'_, D>; N], QueryEntityError> {
-        // Note that this calls `get_many_readonly` instead of `get_many_inner`
-        // since we don't need to check for duplicates.
-        self.as_readonly().get_many_readonly(entities)
+        self.get(entities)
     }
 
     /// Returns the read-only query items for the given array of [`Entity`].
@@ -1271,6 +1277,11 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many`](Self::get_many) for the non-panicking version.
     #[inline]
     #[track_caller]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Systems can now return `Result`. It's recommended to use `query.get(entities).ok_or(err)?` instead."
+    )]
+    #[expect(deprecated, reason = "Calls deprecated `get_many` function.")]
     pub fn many<const N: usize>(&self, entities: [Entity; N]) -> [ROQueryItem<'_, D>; N] {
         match self.get_many(entities) {
             Ok(items) => items,
@@ -1308,8 +1319,11 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get`](Self::get) to get a read-only query item.
     #[inline]
-    pub fn get_mut(&mut self, entity: Entity) -> Result<D::Item<'_>, QueryEntityError> {
-        self.reborrow().get_inner(entity)
+    pub fn get_mut<E: QueryEntityFetch<D, F>>(
+        &mut self,
+        entities: E,
+    ) -> Result<E::Item<'_>, QueryEntityError> {
+        entities.fetch(self.reborrow())
     }
 
     /// Returns the query item for the given [`Entity`].
@@ -1323,13 +1337,29 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get_mut`](Self::get_mut) to get the item using a mutable borrow of the [`Query`].
     #[inline]
-    pub fn get_inner(self, entity: Entity) -> Result<D::Item<'w>, QueryEntityError<'w>> {
-        // SAFETY: system runs without conflicts with other systems.
-        // same-system queries have runtime borrow checks when they conflict
-        unsafe {
-            self.state
-                .get_unchecked_manual(self.world, entity, self.last_run, self.this_run)
-        }
+    pub fn get_inner<E: QueryEntityFetch<D, F>>(
+        self,
+        entities: E,
+    ) -> Result<E::Item<'w>, QueryEntityError<'w>> {
+        entities.fetch(self)
+    }
+
+    /// Returns the query item for the given [`Entity`].
+    /// This consumes the [`Query`] to return results with the actual "inner" world lifetime.
+    ///
+    /// In case of a nonexisting entity or mismatched component, a [`QueryEntityError`] is returned instead.
+    ///
+    /// This is always guaranteed to run in `O(1)` time.
+    ///
+    /// # See also
+    ///
+    /// - [`get_mut`](Self::get_mut) to get the item using a mutable borrow of the [`Query`].
+    #[inline]
+    pub fn get_inner_readonly<E: QueryEntityFetch<D, F>>(
+        self,
+        entities: E,
+    ) -> Result<E::ROItem<'w>, QueryEntityError<'w>> {
+        entities.fetch_readonly(self)
     }
 
     /// Returns the query items for the given array of [`Entity`].
@@ -1342,11 +1372,15 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many`](Self::get_many) to get read-only query items without checking for duplicate entities.
     /// - [`many_mut`](Self::many_mut) for the panicking version.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `get_mut` instead, which now supports arrays."
+    )]
     pub fn get_many_mut<const N: usize>(
         &mut self,
         entities: [Entity; N],
     ) -> Result<[D::Item<'_>; N], QueryEntityError> {
-        self.reborrow().get_many_inner(entities)
+        self.get_mut(entities)
     }
 
     /// Returns the query items for the given array of [`Entity`].
@@ -1362,15 +1396,15 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`get_many_readonly`](Self::get_many_readonly) to get read-only query items without checking for duplicate entities
     ///   with the actual "inner" world lifetime.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `get_inner` instead, which now supports arrays."
+    )]
     pub fn get_many_inner<const N: usize>(
         self,
         entities: [Entity; N],
     ) -> Result<[D::Item<'w>; N], QueryEntityError<'w>> {
-        // SAFETY: scheduler ensures safe Query world access
-        unsafe {
-            self.state
-                .get_many_unchecked_manual(self.world, entities, self.last_run, self.this_run)
-        }
+        self.get_inner(entities)
     }
 
     /// Returns the query items for the given array of [`Entity`].
@@ -1383,8 +1417,12 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get_many`](Self::get_many) to get read-only query items without checking for duplicate entities.
     /// - [`get_many_mut`](Self::get_many_mut) to get items using a mutable reference.
-    /// - [`get_many_inner`](Self::get_many_readonly) to get mutable query items with the actual "inner" world lifetime.
+    /// - [`get_many_inner`](Self::get_many_inner) to get mutable query items with the actual "inner" world lifetime.
     #[inline]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Use `get_inner_readonly` instead, which supports arrays."
+    )]
     pub fn get_many_readonly<const N: usize>(
         self,
         entities: [Entity; N],
@@ -1392,11 +1430,7 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     where
         D: ReadOnlyQueryData,
     {
-        // SAFETY: scheduler ensures safe Query world access
-        unsafe {
-            self.state
-                .get_many_read_only_manual(self.world, entities, self.last_run, self.this_run)
-        }
+        self.get_inner_readonly(entities)
     }
 
     /// Returns the query items for the given array of [`Entity`].
@@ -1449,6 +1483,11 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     /// - [`many`](Self::many) to get read-only query items.
     #[inline]
     #[track_caller]
+    #[deprecated(
+        since = "0.16.0",
+        note = "Systems can now return `Result`. It's recommended to use `query.get_mut(entities).ok_or(err)?` instead."
+    )]
+    #[expect(deprecated, reason = "Calls deprecated `get_many_mut` function.")]
     pub fn many_mut<const N: usize>(&mut self, entities: [Entity; N]) -> [D::Item<'_>; N] {
         match self.get_many_mut(entities) {
             Ok(items) => items,
@@ -1471,9 +1510,12 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Query<'w, 's, D, F> {
     ///
     /// - [`get_mut`](Self::get_mut) for the safe version.
     #[inline]
-    pub unsafe fn get_unchecked(&self, entity: Entity) -> Result<D::Item<'_>, QueryEntityError> {
-        // SAFETY: The caller promises that this will not result in multiple mutable references.
-        unsafe { self.reborrow_unsafe() }.get_inner(entity)
+    pub unsafe fn get_unchecked<E: QueryEntityFetch<D, F>>(
+        &self,
+        entities: E,
+    ) -> Result<E::Item<'_>, QueryEntityError> {
+        // SAFETY: Caller ensures rust's aliasing rules are not violated.
+        entities.fetch(unsafe { self.reborrow_unsafe() })
     }
 
     /// Returns a single read-only query item when there is exactly one entity matching the query.
@@ -2323,5 +2365,205 @@ impl<'w, 's, D: QueryData, F: QueryFilter> Populated<'w, 's, D, F> {
     /// Returns the inner item with ownership.
     pub fn into_inner(self) -> Query<'w, 's, D, F> {
         self.0
+    }
+}
+
+/// Types that can be used to fetch data from a [`Query`].
+///
+/// Provided implementations are:
+/// - [`Entity`]: Fetch data for a single entity.
+/// - `[Entity; N]`: Fetch data for multiple entities, receiving an
+///   equally-sized array of query items.
+///
+/// # Safety
+///
+/// Implementor must ensure that:
+/// - No aliased mutability is caused by the returned query data.
+/// - [`QueryEntityFetch::fetch_readonly`] returns only read-only query items.
+pub unsafe trait QueryEntityFetch<D: QueryData, F: QueryFilter> {
+    /// The type of read-only query items returned by [`QueryEntityFetch::fetch_ref`].
+    type ROItem<'w>;
+
+    /// The type of query items returned by [`QueryEntityFetch::fetch_mut`].
+    type Item<'w>;
+
+    /// Returns read-only query items from the given query for the given
+    /// entities as determined by `self`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QueryEntityError`] if the given entity does not match the
+    /// query, or if the given entity does not exist.
+    fn fetch_readonly<'w>(
+        self,
+        query: Query<'w, '_, D, F>,
+    ) -> Result<Self::ROItem<'w>, QueryEntityError<'w>>;
+
+    /// Returns query items from the given query for the given
+    /// entities as determined by `self`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`QueryEntityError`] if the given entity does not match the
+    /// query, or if the given entity does not exist, or if rust's aliased
+    /// mutability rules are violated.
+    fn fetch<'w>(self, query: Query<'w, '_, D, F>) -> Result<Self::Item<'w>, QueryEntityError<'w>>;
+}
+
+// SAFETY:
+// - No aliased mutability is caused because a single entity's data is fetched.
+// - No mutable references are returned by `fetch_readonly`.
+unsafe impl<D: QueryData, F: QueryFilter> QueryEntityFetch<D, F> for Entity {
+    type ROItem<'w> = ROQueryItem<'w, D>;
+    type Item<'w> = D::Item<'w>;
+
+    fn fetch_readonly<'w>(
+        self,
+        query: Query<'w, '_, D, F>,
+    ) -> Result<Self::ROItem<'w>, QueryEntityError<'w>> {
+        // SAFETY: system runs without conflicts with other systems.
+        // same-system queries have runtime borrow checks when they conflict
+        unsafe {
+            query.state.as_readonly().get_unchecked_manual(
+                query.world,
+                self,
+                query.last_run,
+                query.this_run,
+            )
+        }
+    }
+
+    fn fetch<'w>(self, query: Query<'w, '_, D, F>) -> Result<Self::Item<'w>, QueryEntityError<'w>> {
+        // SAFETY: system runs without conflicts with other systems.
+        // same-system queries have runtime borrow checks when they conflict
+        unsafe {
+            query
+                .state
+                .get_unchecked_manual(query.world, self, query.last_run, query.this_run)
+        }
+    }
+}
+
+// SAFETY:
+// - No aliased mutability is caused because the array is checked for uniqueness.
+// - No mutable references are returned by `fetch_readonly`.
+unsafe impl<D: QueryData, F: QueryFilter, const N: usize> QueryEntityFetch<D, F> for [Entity; N] {
+    type ROItem<'w> = [ROQueryItem<'w, D>; N];
+    type Item<'w> = [D::Item<'w>; N];
+
+    fn fetch_readonly<'w>(
+        self,
+        query: Query<'w, '_, D, F>,
+    ) -> Result<Self::ROItem<'w>, QueryEntityError<'w>> {
+        <&Self>::fetch_readonly(&self, query)
+    }
+
+    fn fetch<'w>(self, query: Query<'w, '_, D, F>) -> Result<Self::Item<'w>, QueryEntityError<'w>> {
+        <&Self>::fetch(&self, query)
+    }
+}
+
+// SAFETY:
+// - No aliased mutability is caused because the array is checked for uniqueness.
+// - No mutable references are returned by `fetch_readonly`.
+unsafe impl<D: QueryData, F: QueryFilter, const N: usize> QueryEntityFetch<D, F> for &[Entity; N] {
+    type ROItem<'w> = [ROQueryItem<'w, D>; N];
+    type Item<'w> = [D::Item<'w>; N];
+
+    fn fetch_readonly<'w>(
+        self,
+        query: Query<'w, '_, D, F>,
+    ) -> Result<Self::ROItem<'w>, QueryEntityError<'w>> {
+        let mut values = [const { MaybeUninit::uninit() }; N];
+
+        for (value, &entity) in core::iter::zip(&mut values, self) {
+            // SAFETY: fetch is read-only and world must be validated
+            let item = unsafe {
+                query.state.as_readonly().get_unchecked_manual(
+                    query.world,
+                    entity,
+                    query.last_run,
+                    query.this_run,
+                )?
+            };
+            *value = MaybeUninit::new(item);
+        }
+
+        // SAFETY: Each value has been fully initialized.
+        Ok(values.map(|x| unsafe { x.assume_init() }))
+    }
+
+    fn fetch<'w>(self, query: Query<'w, '_, D, F>) -> Result<Self::Item<'w>, QueryEntityError<'w>> {
+        // Verify that all entities are unique
+        for i in 0..N {
+            for j in 0..i {
+                if self[i] == self[j] {
+                    return Err(QueryEntityError::AliasedMutability(self[i]));
+                }
+            }
+        }
+
+        let mut values = [const { MaybeUninit::uninit() }; N];
+
+        for (value, &entity) in core::iter::zip(&mut values, self) {
+            // SAFETY: The array of entities was checked for uniqueness.
+            let item = unsafe {
+                query.state.get_unchecked_manual(
+                    query.world,
+                    entity,
+                    query.last_run,
+                    query.this_run,
+                )
+            }?;
+            *value = MaybeUninit::new(item);
+        }
+
+        // SAFETY: Each value has been fully initialized.
+        Ok(values.map(|x| unsafe { x.assume_init() }))
+    }
+}
+
+// SAFETY:
+// - No aliased mutability is caused because `EntityHashSet` itself guarantees unique entities.
+// - No mutable references are returned by `fetch_readonly`.
+unsafe impl<D: QueryData, F: QueryFilter> QueryEntityFetch<D, F> for &EntityHashSet {
+    type ROItem<'w> = EntityHashMap<ROQueryItem<'w, D>>;
+    type Item<'w> = EntityHashMap<D::Item<'w>>;
+
+    fn fetch_readonly<'w>(
+        self,
+        query: Query<'w, '_, D, F>,
+    ) -> Result<Self::ROItem<'w>, QueryEntityError<'w>> {
+        let mut values = EntityHashMap::with_capacity(self.len());
+        for &entity in self.iter() {
+            // SAFETY: fetch is read-only and world must be validated
+            let item = unsafe {
+                query.state.as_readonly().get_unchecked_manual(
+                    query.world,
+                    entity,
+                    query.last_run,
+                    query.this_run,
+                )?
+            };
+            values.insert(entity, item);
+        }
+        Ok(values)
+    }
+
+    fn fetch<'w>(self, query: Query<'w, '_, D, F>) -> Result<Self::Item<'w>, QueryEntityError<'w>> {
+        let mut values = EntityHashMap::with_capacity(self.len());
+        for &entity in self.iter() {
+            // SAFETY: EntityHashSet guarantees that all iterated entities are unique.
+            let item = unsafe {
+                query.state.get_unchecked_manual(
+                    query.world,
+                    entity,
+                    query.last_run,
+                    query.this_run,
+                )?
+            };
+            values.insert(entity, item);
+        }
+        Ok(values)
     }
 }
