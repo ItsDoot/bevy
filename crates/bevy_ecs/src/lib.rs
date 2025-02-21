@@ -58,6 +58,7 @@ pub mod removal_detection;
 pub mod resource;
 pub mod result;
 pub mod schedule;
+pub mod schedule2;
 pub mod spawn;
 pub mod storage;
 pub mod system;

@@ -586,9 +586,9 @@ impl Schedule {
 #[derive(Default)]
 pub struct Dag {
     /// A directed graph.
-    graph: DiGraph,
+    pub(crate) graph: DiGraph,
     /// A cached topological ordering of the graph.
-    topsort: Vec<NodeId>,
+    pub(crate) topsort: Vec<NodeId>,
 }
 
 impl Dag {
@@ -613,7 +613,7 @@ impl Dag {
 }
 
 /// A [`SystemSet`] with metadata, stored in a [`ScheduleGraph`].
-struct SystemSetNode {
+pub(crate) struct SystemSetNode {
     inner: InternedSystemSet,
 }
 

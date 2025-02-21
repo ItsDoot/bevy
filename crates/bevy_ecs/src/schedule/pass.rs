@@ -35,12 +35,7 @@ pub trait ScheduleBuildPass: Send + Sync + Debug + 'static {
 
 /// Object safe version of [`ScheduleBuildPass`].
 pub(super) trait ScheduleBuildPassObj: Send + Sync + Debug {
-    fn build(
-        &mut self,
-        world: &mut World,
-        graph: &mut ScheduleGraph,
-        dependency_flattened: &mut DiGraph,
-    ) -> Result<(), ScheduleBuildError>;
+    fn add_dependency(&mut self, from: NodeId, to: NodeId, all_options: &TypeIdMap<Box<dyn Any>>);
 
     fn collapse_set(
         &mut self,
@@ -49,17 +44,23 @@ pub(super) trait ScheduleBuildPassObj: Send + Sync + Debug {
         dependency_flattened: &DiGraph,
         dependencies_to_add: &mut Vec<(NodeId, NodeId)>,
     );
-    fn add_dependency(&mut self, from: NodeId, to: NodeId, all_options: &TypeIdMap<Box<dyn Any>>);
-}
-impl<T: ScheduleBuildPass> ScheduleBuildPassObj for T {
+
     fn build(
         &mut self,
         world: &mut World,
         graph: &mut ScheduleGraph,
         dependency_flattened: &mut DiGraph,
-    ) -> Result<(), ScheduleBuildError> {
-        self.build(world, graph, dependency_flattened)
+    ) -> Result<(), ScheduleBuildError>;
+}
+
+impl<T: ScheduleBuildPass> ScheduleBuildPassObj for T {
+    fn add_dependency(&mut self, from: NodeId, to: NodeId, all_options: &TypeIdMap<Box<dyn Any>>) {
+        let option = all_options
+            .get(&TypeId::of::<T::EdgeOptions>())
+            .and_then(|x| x.downcast_ref::<T::EdgeOptions>());
+        self.add_dependency(from, to, option);
     }
+
     fn collapse_set(
         &mut self,
         set: NodeId,
@@ -70,10 +71,13 @@ impl<T: ScheduleBuildPass> ScheduleBuildPassObj for T {
         let iter = self.collapse_set(set, systems, dependency_flattened);
         dependencies_to_add.extend(iter);
     }
-    fn add_dependency(&mut self, from: NodeId, to: NodeId, all_options: &TypeIdMap<Box<dyn Any>>) {
-        let option = all_options
-            .get(&TypeId::of::<T::EdgeOptions>())
-            .and_then(|x| x.downcast_ref::<T::EdgeOptions>());
-        self.add_dependency(from, to, option);
+
+    fn build(
+        &mut self,
+        world: &mut World,
+        graph: &mut ScheduleGraph,
+        dependency_flattened: &mut DiGraph,
+    ) -> Result<(), ScheduleBuildError> {
+        self.build(world, graph, dependency_flattened)
     }
 }

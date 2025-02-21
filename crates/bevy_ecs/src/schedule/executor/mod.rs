@@ -157,7 +157,7 @@ pub const apply_deferred: ApplyDeferred = ApplyDeferred;
 pub struct ApplyDeferred;
 
 /// Returns `true` if the [`System`] is an instance of [`ApplyDeferred`].
-pub(super) fn is_apply_deferred(system: &ScheduleSystem) -> bool {
+pub(crate) fn is_apply_deferred(system: &ScheduleSystem) -> bool {
     system.type_id() == TypeId::of::<ApplyDeferred>()
 }
 
