@@ -93,7 +93,7 @@ pub trait GraphNode: Sized {
     /// Metadata used to configure a group of nodes.
     type GroupMetadata: Default;
     /// Extra data returned when processing a group of nodes.
-    type ExtraResult;
+    type ProcessData;
     /// The graph type this node is for.
     type Graph: ScheduleGraph;
 
@@ -111,15 +111,15 @@ pub trait GraphNode: Sized {
         graph: &mut Self::Graph,
         configs: NodeConfigs<Self>,
         collect_nodes: bool,
-    ) -> Result<ProcessedConfigs<SGNodeId<Self::Graph>, Self::ExtraResult>, SGBuildError<Self::Graph>>;
+    ) -> Result<ProcessedConfigs<Self>, SGBuildError<Self::Graph>>;
 }
 
 /// Result of calling [`GraphNode::process_configs`].
-pub struct ProcessedConfigs<N: GraphNodeId, E> {
+pub struct ProcessedConfigs<G: GraphNode> {
     /// The nodes that were processed.
-    pub nodes: Vec<N>,
+    pub nodes: Vec<<G::Graph as ScheduleGraph>::Id>,
     /// Extra data returned from processing the nodes.
-    pub extra: E,
+    pub data: G::ProcessData,
 }
 
 /// An identifier within a [`ScheduleGraph`].

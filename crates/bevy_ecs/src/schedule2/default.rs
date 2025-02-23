@@ -303,9 +303,14 @@ impl DefaultGraph {
         &mut self,
         configs: NodeConfigs<N>,
         collect_nodes: bool,
-    ) -> Result<ProcessedConfigs<NodeId, DenselyChained>, ScheduleBuildError>
+    ) -> Result<ProcessedConfigs<N>, ScheduleBuildError>
     where
-        N: GraphNode<Metadata = NodeMetadata, GroupMetadata = NodeGroupMetadata, Graph = Self>,
+        N: GraphNode<
+            Metadata = NodeMetadata,
+            GroupMetadata = NodeGroupMetadata,
+            ProcessData = DenselyChained,
+            Graph = Self,
+        >,
     {
         match configs {
             NodeConfigs::Single(config) => Ok(ProcessedConfigs {
@@ -313,7 +318,7 @@ impl DefaultGraph {
                     .then_some(N::process_config(self, config)?)
                     .into_iter()
                     .collect(),
-                extra: DenselyChained(true),
+                data: DenselyChained(true),
             }),
             NodeConfigs::Group {
                 mut configs,
@@ -333,27 +338,27 @@ impl DefaultGraph {
                 let Some(first) = configs.next() else {
                     return Ok(ProcessedConfigs {
                         nodes: Vec::new(),
-                        extra: DenselyChained(densely_chained),
+                        data: DenselyChained(densely_chained),
                     });
                 };
                 let mut previous_result =
                     Self::process_configs(self, first, collect_nodes || is_chained)?;
-                densely_chained &= previous_result.extra.0;
+                densely_chained &= previous_result.data.0;
 
                 for current in configs {
                     let current_result =
                         Self::process_configs(self, current, collect_nodes || is_chained)?;
-                    densely_chained &= current_result.extra.0;
+                    densely_chained &= current_result.data.0;
 
                     if let Chain::Chained(chain_options) = &metadata.chain {
                         // if the current result is densely chained, we only need to chain the first node
-                        let current_nodes = if current_result.extra.0 {
+                        let current_nodes = if current_result.data.0 {
                             &current_result.nodes[..1]
                         } else {
                             &current_result.nodes
                         };
                         // if the previous result was densely chained, we only need to chain the last node
-                        let previous_nodes = if previous_result.extra.0 {
+                        let previous_nodes = if previous_result.data.0 {
                             &previous_result.nodes[previous_result.nodes.len() - 1..]
                         } else {
                             &previous_result.nodes
@@ -388,7 +393,7 @@ impl DefaultGraph {
 
                 Ok(ProcessedConfigs {
                     nodes,
-                    extra: DenselyChained(densely_chained),
+                    data: DenselyChained(densely_chained),
                 })
             }
         }
@@ -1416,7 +1421,7 @@ pub struct ScheduleSystem(pub(crate) BoxedSystem<(), Result>);
 impl GraphNode for ScheduleSystem {
     type Metadata = NodeMetadata;
     type GroupMetadata = NodeGroupMetadata;
-    type ExtraResult = DenselyChained;
+    type ProcessData = DenselyChained;
     type Graph = DefaultGraph;
 
     fn into_config(self) -> NodeConfig<Self> {
@@ -1444,7 +1449,7 @@ impl GraphNode for ScheduleSystem {
         graph: &mut DefaultGraph,
         configs: NodeConfigs<Self>,
         collect_nodes: bool,
-    ) -> Result<ProcessedConfigs<NodeId, DenselyChained>, ScheduleBuildError> {
+    ) -> Result<ProcessedConfigs<Self>, ScheduleBuildError> {
         graph.process_configs(configs, collect_nodes)
     }
 }
@@ -1456,7 +1461,7 @@ pub struct ScheduleSystemSet(InternedSystemSet);
 impl GraphNode for ScheduleSystemSet {
     type Metadata = NodeMetadata;
     type GroupMetadata = NodeGroupMetadata;
-    type ExtraResult = DenselyChained;
+    type ProcessData = DenselyChained;
     type Graph = DefaultGraph;
 
     fn into_config(self) -> NodeConfig<Self> {
@@ -1484,7 +1489,7 @@ impl GraphNode for ScheduleSystemSet {
         graph: &mut DefaultGraph,
         configs: NodeConfigs<Self>,
         collect_nodes: bool,
-    ) -> Result<ProcessedConfigs<NodeId, DenselyChained>, ScheduleBuildError> {
+    ) -> Result<ProcessedConfigs<Self>, ScheduleBuildError> {
         graph.process_configs(configs, collect_nodes)
     }
 }
