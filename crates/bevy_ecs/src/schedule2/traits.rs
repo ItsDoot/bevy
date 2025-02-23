@@ -27,7 +27,8 @@ pub trait ScheduleGraph: Default + Send + Sync + 'static {
     type BuildSettings: Clone;
     /// The kind of executors supported by the graph.
     type ExecutorKind: Clone + Copy + PartialEq + Eq + Debug + Default;
-    /// Metadata stored for all schedules of this type.
+    /// Metadata shared between all schedules of this type. Stored in
+    /// [`Schedules`](crate::schedule2::Schedules).
     type GlobalMetadata: Clone + Default + Send + Sync + 'static;
 
     /// Creates a new executor for the graph with the given label.
