@@ -1,4 +1,9 @@
-use core::fmt::Debug;
+use core::fmt::{self, Debug};
+
+use crate::schedule::{
+    graph::Direction,
+    traits::{DirectedGraphNodeId, GraphNodeId, GraphNodeIdPair},
+};
 
 /// Unique identifier for a system or system set stored in a [`ScheduleGraph`].
 ///
@@ -43,5 +48,93 @@ impl NodeId {
             (System(_), Set(_)) => Less,
             (Set(_), System(_)) => Greater,
         }
+    }
+}
+
+impl GraphNodeId for NodeId {
+    type Pair = CompactNodeIdPair;
+    type Directed = CompactNodeIdAndDirection;
+}
+
+/// Compact storage of a [`NodeId`] and a [`Direction`].
+#[derive(Clone, Copy)]
+pub struct CompactNodeIdAndDirection {
+    index: usize,
+    is_system: bool,
+    direction: Direction,
+}
+
+impl DirectedGraphNodeId<NodeId> for CompactNodeIdAndDirection {
+    fn new(node: NodeId, direction: Direction) -> Self {
+        let (index, is_system) = match node {
+            NodeId::System(index) => (index, true),
+            NodeId::Set(index) => (index, false),
+        };
+
+        Self {
+            index,
+            is_system,
+            direction,
+        }
+    }
+
+    fn unpack(self) -> (NodeId, Direction) {
+        let Self {
+            index,
+            is_system,
+            direction,
+        } = self;
+
+        let node = match is_system {
+            true => NodeId::System(index),
+            false => NodeId::Set(index),
+        };
+
+        (node, direction)
+    }
+}
+
+impl Debug for CompactNodeIdAndDirection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.unpack().fmt(f)
+    }
+}
+
+/// Compact storage of a [`NodeId`] pair.
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct CompactNodeIdPair {
+    index_a: usize,
+    index_b: usize,
+    is_system_a: bool,
+    is_system_b: bool,
+}
+
+impl GraphNodeIdPair<NodeId> for CompactNodeIdPair {
+    fn new(a: NodeId, b: NodeId) -> Self {
+        Self {
+            index_a: a.index(),
+            is_system_a: a.is_system(),
+            index_b: b.index(),
+            is_system_b: b.is_system(),
+        }
+    }
+
+    fn unpack(self) -> (NodeId, NodeId) {
+        (
+            match self.is_system_a {
+                true => NodeId::System(self.index_a),
+                false => NodeId::Set(self.index_a),
+            },
+            match self.is_system_b {
+                true => NodeId::System(self.index_b),
+                false => NodeId::Set(self.index_b),
+            },
+        )
+    }
+}
+
+impl Debug for CompactNodeIdPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.unpack().fmt(f)
     }
 }

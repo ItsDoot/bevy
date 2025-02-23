@@ -29,7 +29,7 @@ use crate::{
     prelude::Component,
     resource::Resource,
     result::{DefaultSystemErrorHandler, Error, SystemErrorContext},
-    schedule::*,
+    schedule::{traits::GraphNodeId, *},
     system::ScheduleSystem,
     world::World,
 };
@@ -583,32 +583,33 @@ impl Schedule {
 }
 
 /// A directed acyclic graph structure.
-#[derive(Default)]
-pub struct Dag {
+pub struct Dag<Id: GraphNodeId> {
     /// A directed graph.
-    graph: DiGraph,
+    graph: DiGraph<Id>,
     /// A cached topological ordering of the graph.
-    topsort: Vec<NodeId>,
+    topsort: Vec<Id>,
 }
 
-impl Dag {
-    fn new() -> Self {
-        Self {
-            graph: DiGraph::default(),
-            topsort: Vec::new(),
-        }
-    }
-
+impl<Id: GraphNodeId> Dag<Id> {
     /// The directed graph of the stored systems, connected by their ordering dependencies.
-    pub fn graph(&self) -> &DiGraph {
+    pub fn graph(&self) -> &DiGraph<Id> {
         &self.graph
     }
 
     /// A cached topological ordering of the graph.
     ///
     /// The order is determined by the ordering dependencies between systems.
-    pub fn cached_topsort(&self) -> &[NodeId] {
+    pub fn cached_topsort(&self) -> &[Id] {
         &self.topsort
+    }
+}
+
+impl<Id: GraphNodeId> Default for Dag<Id> {
+    fn default() -> Self {
+        Self {
+            graph: Default::default(),
+            topsort: Default::default(),
+        }
     }
 }
 
@@ -679,10 +680,10 @@ pub struct ScheduleGraph {
     /// (all the conditions after that index still need to be initialized)
     uninit: Vec<(NodeId, usize)>,
     /// Directed acyclic graph of the hierarchy (which systems/sets are children of which sets)
-    hierarchy: Dag,
+    hierarchy: Dag<NodeId>,
     /// Directed acyclic graph of the dependency (which systems/sets have to run before which other systems/sets)
-    dependency: Dag,
-    ambiguous_with: UnGraph,
+    dependency: Dag<NodeId>,
+    ambiguous_with: UnGraph<NodeId>,
     /// Nodes that are allowed to have ambiguous ordering relationship with any other systems.
     pub ambiguous_with_all: HashSet<NodeId>,
     conflicting_systems: Vec<(NodeId, NodeId, Vec<ComponentId>)>,
@@ -703,8 +704,8 @@ impl ScheduleGraph {
             system_set_conditions: Vec::new(),
             system_set_ids: HashMap::default(),
             uninit: Vec::new(),
-            hierarchy: Dag::new(),
-            dependency: Dag::new(),
+            hierarchy: Dag::default(),
+            dependency: Dag::default(),
             ambiguous_with: UnGraph::default(),
             ambiguous_with_all: HashSet::default(),
             conflicting_systems: Vec::new(),
@@ -805,7 +806,7 @@ impl ScheduleGraph {
     ///
     /// The hierarchy is a directed acyclic graph of the systems and sets,
     /// where an edge denotes that a system or set is the child of another set.
-    pub fn hierarchy(&self) -> &Dag {
+    pub fn hierarchy(&self) -> &Dag<NodeId> {
         &self.hierarchy
     }
 
@@ -813,7 +814,7 @@ impl ScheduleGraph {
     ///
     /// Nodes in this graph are systems and sets, and edges denote that
     /// a system or set has to run before another system or set.
-    pub fn dependency(&self) -> &Dag {
+    pub fn dependency(&self) -> &Dag<NodeId> {
         &self.dependency
     }
 
@@ -1242,7 +1243,7 @@ impl ScheduleGraph {
     fn map_sets_to_systems(
         &self,
         hierarchy_topsort: &[NodeId],
-        hierarchy_graph: &DiGraph,
+        hierarchy_graph: &DiGraph<NodeId>,
     ) -> (HashMap<NodeId, Vec<NodeId>>, HashMap<NodeId, FixedBitSet>) {
         let mut set_systems: HashMap<NodeId, Vec<NodeId>> =
             HashMap::with_capacity_and_hasher(self.system_sets.len(), Default::default());
@@ -1277,7 +1278,10 @@ impl ScheduleGraph {
         (set_systems, set_system_bitsets)
     }
 
-    fn get_dependency_flattened(&mut self, set_systems: &HashMap<NodeId, Vec<NodeId>>) -> DiGraph {
+    fn get_dependency_flattened(
+        &mut self,
+        set_systems: &HashMap<NodeId, Vec<NodeId>>,
+    ) -> DiGraph<NodeId> {
         // flatten: combine `in_set` with `before` and `after` information
         // have to do it like this to preserve transitivity
         let mut dependency_flattened = self.dependency.graph.clone();
@@ -1316,7 +1320,10 @@ impl ScheduleGraph {
         dependency_flattened
     }
 
-    fn get_ambiguous_with_flattened(&self, set_systems: &HashMap<NodeId, Vec<NodeId>>) -> UnGraph {
+    fn get_ambiguous_with_flattened(
+        &self,
+        set_systems: &HashMap<NodeId, Vec<NodeId>>,
+    ) -> UnGraph<NodeId> {
         let mut ambiguous_with_flattened = UnGraph::default();
         for (lhs, rhs) in self.ambiguous_with.all_edges() {
             match (lhs, rhs) {
@@ -1349,7 +1356,7 @@ impl ScheduleGraph {
     fn get_conflicting_systems(
         &self,
         flat_results_disconnected: &Vec<(NodeId, NodeId)>,
-        ambiguous_with_flattened: &UnGraph,
+        ambiguous_with_flattened: &UnGraph<NodeId>,
         ignored_ambiguities: &BTreeSet<ComponentId>,
     ) -> Vec<(NodeId, NodeId, Vec<ComponentId>)> {
         let mut conflicting_systems = Vec::new();
@@ -1395,7 +1402,7 @@ impl ScheduleGraph {
 
     fn build_schedule_inner(
         &self,
-        dependency_flattened_dag: Dag,
+        dependency_flattened_dag: Dag<NodeId>,
         hier_results_reachable: FixedBitSet,
     ) -> SystemSchedule {
         let dg_system_ids = dependency_flattened_dag.topsort.clone();
@@ -1695,7 +1702,7 @@ impl ScheduleGraph {
     /// If the graph contain cycles, then an error is returned.
     pub fn topsort_graph(
         &self,
-        graph: &DiGraph,
+        graph: &DiGraph<NodeId>,
         report: ReportCycles,
     ) -> Result<Vec<NodeId>, ScheduleBuildError> {
         // Tarjan's SCC algorithm returns elements in *reverse* topological order.
@@ -1783,7 +1790,7 @@ impl ScheduleGraph {
 
     fn check_for_cross_dependencies(
         &self,
-        dep_results: &CheckGraphResults,
+        dep_results: &CheckGraphResults<NodeId>,
         hier_results_connected: &HashSet<(NodeId, NodeId)>,
     ) -> Result<(), ScheduleBuildError> {
         for &(a, b) in &dep_results.connected {

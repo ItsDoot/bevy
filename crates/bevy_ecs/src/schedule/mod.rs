@@ -8,6 +8,7 @@ mod pass;
 mod schedule;
 mod set;
 mod stepping;
+pub mod traits;
 
 use self::graph::*;
 pub use self::{condition::*, config::*, executor::*, schedule::*, set::*};
