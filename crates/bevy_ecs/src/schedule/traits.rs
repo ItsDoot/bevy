@@ -34,7 +34,7 @@ pub trait ScheduleGraph: Default + Send + Sync + 'static {
     /// [`Schedules`](crate::schedule2::Schedules).
     type GlobalMetadata: Clone + Default + Send + Sync + 'static;
 
-    /// Creates a new executor for the graph with the given label.
+    /// Creates a new executor of the given kind.
     fn new_executor(kind: Self::ExecutorKind) -> Box<dyn ScheduleExecutor<Self>>;
 
     /// Returns true if the graph has changed since the last build.
