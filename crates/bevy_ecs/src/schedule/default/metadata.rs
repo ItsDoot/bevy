@@ -152,7 +152,7 @@ impl Chain {
 
 impl<N: NodeType<Metadata: AsMut<GraphInfo>>> NodeConfigs<N> {
     /// Adds a new boxed system set to the systems.
-    pub(crate) fn in_set_inner(&mut self, set: InternedSystemSet) {
+    pub fn in_set_inner(&mut self, set: InternedSystemSet) {
         match self {
             Self::Single(config) => {
                 config.metadata.as_mut().hierarchy.push(set);
