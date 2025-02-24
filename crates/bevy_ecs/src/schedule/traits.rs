@@ -141,6 +141,16 @@ pub trait GraphNodeIdPair<Id: GraphNodeId>: Copy + Eq + Hash {
     fn unpack(self) -> (Id, Id);
 }
 
+impl<Id: GraphNodeId> GraphNodeIdPair<Id> for (Id, Id) {
+    fn new(a: Id, b: Id) -> Self {
+        (a, b)
+    }
+
+    fn unpack(self) -> (Id, Id) {
+        self
+    }
+}
+
 /// Trait for types that hold a [`GraphNodeId`] and a [`Direction`]. Typically
 /// stored in a memory-efficient way.
 pub trait DirectedGraphNodeId<Id: GraphNodeId>: Copy + Debug {
@@ -149,4 +159,14 @@ pub trait DirectedGraphNodeId<Id: GraphNodeId>: Copy + Debug {
 
     /// Unpacks the directed identifier into its components.
     fn unpack(self) -> (Id, Direction);
+}
+
+impl<Id: GraphNodeId> DirectedGraphNodeId<Id> for (Id, Direction) {
+    fn new(node: Id, direction: Direction) -> Self {
+        (node, direction)
+    }
+
+    fn unpack(self) -> (Id, Direction) {
+        self
+    }
 }
