@@ -1263,11 +1263,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{common_conditions::*, Condition};
-    use crate::query::With;
     use crate::{
         change_detection::ResMut,
         component::Component,
-        schedule::{IntoSystemConfigs, Schedule},
+        query::With,
+        schedule::{
+            default::{IntoChainableNodeConfigs, IntoConditionalNodeConfigs},
+            Schedule,
+        },
         system::Local,
         world::World,
     };

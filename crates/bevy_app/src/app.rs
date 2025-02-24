@@ -14,7 +14,11 @@ use bevy_ecs::{
     intern::Interned,
     prelude::*,
     result::{Error, SystemErrorContext},
-    schedule::{ScheduleBuildSettings, ScheduleLabel},
+    schedule::{
+        default::{DefaultGraph, ScheduledSystem, ScheduledSystemSet},
+        traits::ScheduleGraph,
+        ScheduleLabel,
+    },
     system::{IntoObserverSystem, SystemId, SystemInput},
 };
 use bevy_platform_support::collections::HashMap;
@@ -302,7 +306,7 @@ impl App {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoSystemConfigs<M>,
+        systems: impl IntoNodeConfigs<ScheduledSystem, DefaultGraph, M>,
     ) -> &mut Self {
         self.main_mut().add_systems(schedule, systems);
         self
@@ -330,10 +334,10 @@ impl App {
 
     /// Configures a collection of system sets in the provided schedule, adding any sets that do not exist.
     #[track_caller]
-    pub fn configure_sets(
+    pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoSystemSetConfigs,
+        sets: impl IntoNodeConfigs<ScheduledSystemSet, DefaultGraph, M>,
     ) -> &mut Self {
         self.main_mut().configure_sets(schedule, sets);
         self
@@ -1168,11 +1172,12 @@ impl App {
     }
 
     /// Applies the provided [`ScheduleBuildSettings`] to all schedules.
-    pub fn configure_schedules(
+    pub fn configure_schedules<G: ScheduleGraph>(
         &mut self,
-        schedule_build_settings: ScheduleBuildSettings,
+        schedule_build_settings: G::BuildSettings,
     ) -> &mut Self {
-        self.main_mut().configure_schedules(schedule_build_settings);
+        self.main_mut()
+            .configure_schedules::<G>(schedule_build_settings);
         self
     }
 
@@ -1446,7 +1451,7 @@ mod tests {
         query::With,
         removal_detection::RemovedComponents,
         resource::Resource,
-        schedule::{IntoSystemConfigs, ScheduleLabel},
+        schedule::{default::IntoOrderedNodeConfigs, ScheduleLabel},
         system::{Commands, Query},
         world::{FromWorld, World},
     };

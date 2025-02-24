@@ -1,6 +1,6 @@
 use crate::{
     resource::Resource,
-    schedule::{InternedScheduleLabel, NodeId, Schedule, ScheduleLabel},
+    schedule::{default::NodeId, InternedScheduleLabel, Schedule, ScheduleLabel},
     system::{IntoSystem, ResMut},
 };
 use alloc::vec::Vec;

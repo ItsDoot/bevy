@@ -8,7 +8,7 @@ use bevy_ecs::{
     prelude::Entity,
     query::{Has, With},
     resource::Resource,
-    schedule::IntoSystemConfigs as _,
+    schedule::default::IntoOrderedNodeConfigs,
     system::{Query, Res, ResMut, StaticSystemParam},
     world::{FromWorld, World},
 };

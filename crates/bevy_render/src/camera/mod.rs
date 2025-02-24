@@ -4,6 +4,7 @@ mod clear_color;
 mod manual_texture_view;
 mod projection;
 
+use bevy_ecs::schedule::default::IntoOrderedNodeConfigs;
 pub use camera::*;
 pub use camera_driver_node::*;
 pub use clear_color::*;
@@ -15,7 +16,6 @@ use crate::{
     render_graph::RenderGraph, ExtractSchedule, Render, RenderApp, RenderSet,
 };
 use bevy_app::{App, Plugin};
-use bevy_ecs::schedule::IntoSystemConfigs;
 
 #[derive(Default)]
 pub struct CameraPlugin;

@@ -3,6 +3,7 @@
 mod auto_insert_apply_deferred;
 mod condition;
 mod config;
+pub mod default;
 mod executor;
 mod pass;
 mod schedule;
@@ -13,8 +14,6 @@ pub mod traits;
 use self::graph::*;
 pub use self::{condition::*, config::*, executor::*, schedule::*, set::*};
 pub use pass::ScheduleBuildPass;
-
-pub use self::graph::NodeId;
 
 /// An implementation of a graph data structure.
 pub mod graph;
@@ -129,6 +128,8 @@ mod tests {
     }
 
     mod system_ordering {
+        use crate::schedule::default::{IntoChainableNodeConfigs, IntoOrderedNodeConfigs};
+
         use super::*;
 
         #[test]
@@ -253,7 +254,12 @@ mod tests {
     }
 
     mod conditions {
-        use crate::change_detection::DetectChanges;
+        use crate::{
+            change_detection::DetectChanges,
+            schedule::default::{
+                IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoOrderedNodeConfigs,
+            },
+        };
 
         use super::*;
 
@@ -532,6 +538,10 @@ mod tests {
     }
 
     mod schedule_build_errors {
+        use crate::schedule::default::{
+            DefaultBuildError, DefaultBuildSettings, IntoOrderedNodeConfigs, LogLevel,
+        };
+
         use super::*;
 
         #[test]
@@ -550,10 +560,7 @@ mod tests {
             schedule.configure_sets(TestSet::B.after(TestSet::A));
 
             let result = schedule.initialize(&mut world);
-            assert!(matches!(
-                result,
-                Err(ScheduleBuildError::DependencyCycle(_))
-            ));
+            assert!(matches!(result, Err(DefaultBuildError::DependencyCycle(_))));
 
             fn foo() {}
             fn bar() {}
@@ -563,10 +570,7 @@ mod tests {
 
             schedule.add_systems((foo.after(bar), bar.after(foo)));
             let result = schedule.initialize(&mut world);
-            assert!(matches!(
-                result,
-                Err(ScheduleBuildError::DependencyCycle(_))
-            ));
+            assert!(matches!(result, Err(DefaultBuildError::DependencyCycle(_))));
         }
 
         #[test]
@@ -585,7 +589,7 @@ mod tests {
             schedule.configure_sets(TestSet::B.in_set(TestSet::A));
 
             let result = schedule.initialize(&mut world);
-            assert!(matches!(result, Err(ScheduleBuildError::HierarchyCycle(_))));
+            assert!(matches!(result, Err(DefaultBuildError::HierarchyCycle(_))));
         }
 
         #[test]
@@ -612,7 +616,7 @@ mod tests {
             let result = schedule.initialize(&mut world);
             assert!(matches!(
                 result,
-                Err(ScheduleBuildError::SystemTypeSetAmbiguity(_))
+                Err(DefaultBuildError::SystemTypeSetAmbiguity(_))
             ));
 
             // same goes for `ambiguous_with`
@@ -625,7 +629,7 @@ mod tests {
             let result = schedule.initialize(&mut world);
             assert!(matches!(
                 result,
-                Err(ScheduleBuildError::SystemTypeSetAmbiguity(_))
+                Err(DefaultBuildError::SystemTypeSetAmbiguity(_))
             ));
         }
 
@@ -642,7 +646,7 @@ mod tests {
             let mut world = World::new();
             let mut schedule = Schedule::default();
 
-            schedule.set_build_settings(ScheduleBuildSettings {
+            schedule.set_build_settings(DefaultBuildSettings {
                 hierarchy_detection: LogLevel::Error,
                 ..Default::default()
             });
@@ -660,7 +664,7 @@ mod tests {
             let result = schedule.initialize(&mut world);
             assert!(matches!(
                 result,
-                Err(ScheduleBuildError::HierarchyRedundancy(_))
+                Err(DefaultBuildError::HierarchyRedundancy(_))
             ));
         }
 
@@ -675,7 +679,7 @@ mod tests {
             let result = schedule.initialize(&mut world);
             assert!(matches!(
                 result,
-                Err(ScheduleBuildError::CrossDependency(_, _))
+                Err(DefaultBuildError::CrossDependency(_, _))
             ));
         }
 
@@ -700,7 +704,7 @@ mod tests {
             // `foo` can't be in both `A` and `C` because they can't run at the same time.
             assert!(matches!(
                 result,
-                Err(ScheduleBuildError::SetsHaveOrderButIntersect(_, _))
+                Err(DefaultBuildError::SetsHaveOrderButIntersect(_, _))
             ));
         }
 
@@ -715,14 +719,14 @@ mod tests {
             let mut world = World::new();
             let mut schedule = Schedule::default();
 
-            schedule.set_build_settings(ScheduleBuildSettings {
+            schedule.set_build_settings(DefaultBuildSettings {
                 ambiguity_detection: LogLevel::Error,
                 ..Default::default()
             });
 
             schedule.add_systems((res_ref, res_mut));
             let result = schedule.initialize(&mut world);
-            assert!(matches!(result, Err(ScheduleBuildError::Ambiguity(_))));
+            assert!(matches!(result, Err(DefaultBuildError::Ambiguity(_))));
         }
     }
 
@@ -730,7 +734,13 @@ mod tests {
         use alloc::collections::BTreeSet;
 
         use super::*;
-        use crate::prelude::*;
+        use crate::{
+            prelude::*,
+            schedule::{
+                default::{IntoConditionalNodeConfigs, IntoOrderedNodeConfigs},
+                traits::ScheduleGraph,
+            },
+        };
 
         #[derive(Resource)]
         struct R;

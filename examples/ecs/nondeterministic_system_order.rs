@@ -12,10 +12,8 @@
 //!
 //! This example demonstrates how you might detect and resolve (or silence) these ambiguities.
 
-use bevy::{
-    ecs::schedule::{LogLevel, ScheduleBuildSettings},
-    prelude::*,
-};
+use bevy::prelude::*;
+use bevy_ecs::schedule::default::{DefaultBuildSettings, LogLevel};
 
 fn main() {
     App::new()
@@ -23,7 +21,7 @@ fn main() {
         // You must do this for each schedule you want to inspect; child schedules executed within an inspected
         // schedule do not inherit this modification.
         .edit_schedule(Update, |schedule| {
-            schedule.set_build_settings(ScheduleBuildSettings {
+            schedule.set_build_settings(DefaultBuildSettings {
                 ambiguity_detection: LogLevel::Warn,
                 ..default()
             });

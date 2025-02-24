@@ -2,12 +2,12 @@ use alloc::{boxed::Box, collections::BTreeSet, vec::Vec};
 
 use bevy_platform_support::collections::HashMap;
 
-use crate::system::IntoSystem;
+use crate::schedule::default::{DefaultBuildError, DefaultGraph, SystemNode};
 use crate::world::World;
+use crate::{schedule::default::NodeId, system::IntoSystem};
 
 use super::{
-    is_apply_deferred, ApplyDeferred, DiGraph, Direction, NodeId, ReportCycles, ScheduleBuildError,
-    ScheduleBuildPass, ScheduleGraph, SystemNode,
+    is_apply_deferred, ApplyDeferred, DiGraph, Direction, ReportCycles, ScheduleBuildPass,
 };
 
 /// A [`ScheduleBuildPass`] that inserts [`ApplyDeferred`] systems into the schedule graph
@@ -32,7 +32,7 @@ pub struct IgnoreDeferred;
 impl AutoInsertApplyDeferredPass {
     /// Returns the `NodeId` of the cached auto sync point. Will create
     /// a new one if needed.
-    fn get_sync_point(&mut self, graph: &mut ScheduleGraph, distance: u32) -> NodeId {
+    fn get_sync_point(&mut self, graph: &mut DefaultGraph, distance: u32) -> NodeId {
         self.auto_sync_node_ids
             .get(&distance)
             .copied()
@@ -44,7 +44,7 @@ impl AutoInsertApplyDeferredPass {
             .unwrap()
     }
     /// add an [`ApplyDeferred`] system with no config
-    fn add_auto_sync(&mut self, graph: &mut ScheduleGraph) -> NodeId {
+    fn add_auto_sync(&mut self, graph: &mut DefaultGraph) -> NodeId {
         let id = NodeId::System(graph.systems.len());
 
         graph
@@ -62,7 +62,7 @@ impl AutoInsertApplyDeferredPass {
     }
 }
 
-impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
+impl ScheduleBuildPass<DefaultGraph> for AutoInsertApplyDeferredPass {
     type EdgeOptions = IgnoreDeferred;
 
     fn add_dependency(&mut self, from: NodeId, to: NodeId, options: Option<&Self::EdgeOptions>) {
@@ -74,9 +74,9 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
     fn build(
         &mut self,
         _world: &mut World,
-        graph: &mut ScheduleGraph,
+        graph: &mut DefaultGraph,
         dependency_flattened: &mut DiGraph<NodeId>,
-    ) -> Result<(), ScheduleBuildError> {
+    ) -> Result<(), DefaultBuildError> {
         let mut sync_point_graph = dependency_flattened.clone();
         let topo = graph.topsort_graph(dependency_flattened, ReportCycles::Dependency)?;
 

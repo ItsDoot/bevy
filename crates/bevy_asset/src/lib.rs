@@ -217,12 +217,11 @@ use alloc::{
     vec::Vec,
 };
 use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
-use bevy_ecs::prelude::Component;
 use bevy_ecs::{
-    reflect::AppTypeRegistry,
-    schedule::{IntoSystemConfigs, IntoSystemSetConfigs, SystemSet},
-    world::FromWorld,
+    prelude::Component,
+    schedule::default::{IntoConditionalNodeConfigs, IntoOrderedNodeConfigs},
 };
+use bevy_ecs::{reflect::AppTypeRegistry, schedule::SystemSet, world::FromWorld};
 use bevy_platform_support::collections::HashSet;
 use bevy_reflect::{FromReflect, GetTypeRegistration, Reflect, TypePath};
 use core::any::TypeId;
@@ -653,7 +652,7 @@ mod tests {
     use bevy_ecs::{
         event::EventCursor,
         prelude::*,
-        schedule::{LogLevel, ScheduleBuildSettings},
+        schedule::default::{DefaultBuildSettings, LogLevel},
     };
     use bevy_log::LogPlugin;
     use bevy_platform_support::collections::HashMap;
@@ -1770,7 +1769,7 @@ mod tests {
         fn uses_assets(_asset: ResMut<Assets<CoolText>>) {}
         app.add_systems(Update, (uses_assets, uses_assets));
         app.edit_schedule(Update, |s| {
-            s.set_build_settings(ScheduleBuildSettings {
+            s.set_build_settings(DefaultBuildSettings {
                 ambiguity_detection: LogLevel::Error,
                 ..Default::default()
             });

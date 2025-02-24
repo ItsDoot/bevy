@@ -4,7 +4,11 @@ use bevy_ecs::{
     event::EventRegistry,
     prelude::*,
     result::{DefaultSystemErrorHandler, SystemErrorContext},
-    schedule::{InternedScheduleLabel, ScheduleBuildSettings, ScheduleLabel},
+    schedule::{
+        default::{DefaultGraph, ScheduledSystem, ScheduledSystemSet},
+        traits::ScheduleGraph,
+        InternedScheduleLabel, ScheduleLabel,
+    },
     system::{SystemId, SystemInput},
 };
 use bevy_platform_support::collections::{HashMap, HashSet};
@@ -212,7 +216,7 @@ impl SubApp {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoSystemConfigs<M>,
+        systems: impl IntoNodeConfigs<ScheduledSystem, DefaultGraph, M>,
     ) -> &mut Self {
         let mut schedules = self.world.resource_mut::<Schedules>();
         schedules.add_systems(schedule, systems);
@@ -234,10 +238,10 @@ impl SubApp {
 
     /// See [`App::configure_sets`].
     #[track_caller]
-    pub fn configure_sets(
+    pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoSystemSetConfigs,
+        sets: impl IntoNodeConfigs<ScheduledSystemSet, DefaultGraph, M>,
     ) -> &mut Self {
         let mut schedules = self.world.resource_mut::<Schedules>();
         schedules.configure_sets(schedule, sets);
@@ -294,12 +298,12 @@ impl SubApp {
     }
 
     /// See [`App::configure_schedules`].
-    pub fn configure_schedules(
+    pub fn configure_schedules<G: ScheduleGraph>(
         &mut self,
-        schedule_build_settings: ScheduleBuildSettings,
+        schedule_build_settings: G::BuildSettings,
     ) -> &mut Self {
         self.world_mut()
-            .resource_mut::<Schedules>()
+            .resource_mut::<Schedules<G>>()
             .configure_schedules(schedule_build_settings);
         self
     }

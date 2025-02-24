@@ -9,7 +9,10 @@ use std::eprintln;
 
 use crate::{
     result::{Error, SystemErrorContext},
-    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
+    schedule::{
+        default::{DefaultGraph, DefaultGraphExecutable},
+        is_apply_deferred, BoxedCondition, ExecutorKind, ScheduleExecutor,
+    },
     world::World,
 };
 
@@ -31,15 +34,15 @@ pub struct SingleThreadedExecutor {
     apply_final_deferred: bool,
 }
 
-impl SystemExecutor for SingleThreadedExecutor {
+impl ScheduleExecutor<DefaultGraph> for SingleThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::SingleThreaded
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, executable: &DefaultGraphExecutable) {
         // pre-allocate space
-        let sys_count = schedule.system_ids.len();
-        let set_count = schedule.set_ids.len();
+        let sys_count = executable.system_ids.len();
+        let set_count = executable.set_ids.len();
         self.evaluated_sets = FixedBitSet::with_capacity(set_count);
         self.completed_systems = FixedBitSet::with_capacity(sys_count);
         self.unapplied_systems = FixedBitSet::with_capacity(sys_count);
@@ -47,7 +50,7 @@ impl SystemExecutor for SingleThreadedExecutor {
 
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        executable: &mut DefaultGraphExecutable,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: fn(Error, SystemErrorContext),
@@ -60,25 +63,25 @@ impl SystemExecutor for SingleThreadedExecutor {
             self.completed_systems |= skipped_systems;
         }
 
-        for system_index in 0..schedule.systems.len() {
+        for system_index in 0..executable.systems.len() {
             #[cfg(feature = "trace")]
-            let name = schedule.systems[system_index].name();
+            let name = executable.systems[system_index].name();
             #[cfg(feature = "trace")]
             let should_run_span = info_span!("check_conditions", name = &*name).entered();
 
             let mut should_run = !self.completed_systems.contains(system_index);
-            for set_idx in schedule.sets_with_conditions_of_systems[system_index].ones() {
+            for set_idx in executable.sets_with_conditions_of_systems[system_index].ones() {
                 if self.evaluated_sets.contains(set_idx) {
                     continue;
                 }
 
                 // evaluate system set's conditions
                 let set_conditions_met =
-                    evaluate_and_fold_conditions(&mut schedule.set_conditions[set_idx], world);
+                    evaluate_and_fold_conditions(&mut executable.set_conditions[set_idx], world);
 
                 if !set_conditions_met {
                     self.completed_systems
-                        .union_with(&schedule.systems_in_sets_with_conditions[set_idx]);
+                        .union_with(&executable.systems_in_sets_with_conditions[set_idx]);
                 }
 
                 should_run &= set_conditions_met;
@@ -86,12 +89,14 @@ impl SystemExecutor for SingleThreadedExecutor {
             }
 
             // evaluate system's conditions
-            let system_conditions_met =
-                evaluate_and_fold_conditions(&mut schedule.system_conditions[system_index], world);
+            let system_conditions_met = evaluate_and_fold_conditions(
+                &mut executable.system_conditions[system_index],
+                world,
+            );
 
             should_run &= system_conditions_met;
 
-            let system = &mut schedule.systems[system_index];
+            let system = &mut executable.systems[system_index];
             if should_run {
                 let valid_params = system.validate_param(world);
                 should_run &= valid_params;
@@ -108,7 +113,7 @@ impl SystemExecutor for SingleThreadedExecutor {
             }
 
             if is_apply_deferred(system) {
-                self.apply_deferred(schedule, world);
+                self.apply_deferred(executable, world);
                 continue;
             }
 
@@ -160,7 +165,7 @@ impl SystemExecutor for SingleThreadedExecutor {
         }
 
         if self.apply_final_deferred {
-            self.apply_deferred(schedule, world);
+            self.apply_deferred(executable, world);
         }
         self.evaluated_sets.clear();
         self.completed_systems.clear();
@@ -184,7 +189,7 @@ impl SingleThreadedExecutor {
         }
     }
 
-    fn apply_deferred(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
+    fn apply_deferred(&mut self, schedule: &mut DefaultGraphExecutable, world: &mut World) {
         for system_index in self.unapplied_systems.ones() {
             let system = &mut schedule.systems[system_index];
             system.apply_deferred(world);

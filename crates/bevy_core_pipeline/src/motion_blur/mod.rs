@@ -12,7 +12,7 @@ use bevy_ecs::{
     component::{require, Component},
     query::With,
     reflect::ReflectComponent,
-    schedule::IntoSystemConfigs,
+    schedule::default::IntoOrderedNodeConfigs,
 };
 use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 use bevy_render::{

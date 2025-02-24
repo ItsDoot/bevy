@@ -5,8 +5,11 @@ use bevy_app::{App, Plugin, SubApp};
 pub use bevy_asset::RenderAssetUsages;
 use bevy_asset::{Asset, AssetEvent, AssetId, Assets};
 use bevy_ecs::{
-    prelude::{Commands, EventReader, IntoSystemConfigs, ResMut, Resource},
-    schedule::{SystemConfigs, SystemSet},
+    prelude::{Commands, EventReader, ResMut, Resource},
+    schedule::{
+        default::{IntoOrderedNodeConfigs, SystemConfigs},
+        SystemSet,
+    },
     system::{StaticSystemParam, SystemParam, SystemParamItem, SystemState},
     world::{FromWorld, Mut},
 };

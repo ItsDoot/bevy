@@ -10,7 +10,9 @@ use std::eprintln;
 use crate::{
     result::{Error, SystemErrorContext},
     schedule::{
-        executor::is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule,
+        default::{DefaultGraph, DefaultGraphExecutable},
+        executor::is_apply_deferred,
+        BoxedCondition, ExecutorKind, ScheduleExecutor,
     },
     world::World,
 };
@@ -27,21 +29,21 @@ pub struct SimpleExecutor {
     completed_systems: FixedBitSet,
 }
 
-impl SystemExecutor for SimpleExecutor {
+impl ScheduleExecutor<DefaultGraph> for SimpleExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::Simple
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
-        let sys_count = schedule.system_ids.len();
-        let set_count = schedule.set_ids.len();
+    fn init(&mut self, executable: &DefaultGraphExecutable) {
+        let sys_count = executable.system_ids.len();
+        let set_count = executable.set_ids.len();
         self.evaluated_sets = FixedBitSet::with_capacity(set_count);
         self.completed_systems = FixedBitSet::with_capacity(sys_count);
     }
 
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        executable: &mut DefaultGraphExecutable,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: fn(Error, SystemErrorContext),
@@ -54,25 +56,25 @@ impl SystemExecutor for SimpleExecutor {
             self.completed_systems |= skipped_systems;
         }
 
-        for system_index in 0..schedule.systems.len() {
+        for system_index in 0..executable.systems.len() {
             #[cfg(feature = "trace")]
-            let name = schedule.systems[system_index].name();
+            let name = executable.systems[system_index].name();
             #[cfg(feature = "trace")]
             let should_run_span = info_span!("check_conditions", name = &*name).entered();
 
             let mut should_run = !self.completed_systems.contains(system_index);
-            for set_idx in schedule.sets_with_conditions_of_systems[system_index].ones() {
+            for set_idx in executable.sets_with_conditions_of_systems[system_index].ones() {
                 if self.evaluated_sets.contains(set_idx) {
                     continue;
                 }
 
                 // evaluate system set's conditions
                 let set_conditions_met =
-                    evaluate_and_fold_conditions(&mut schedule.set_conditions[set_idx], world);
+                    evaluate_and_fold_conditions(&mut executable.set_conditions[set_idx], world);
 
                 if !set_conditions_met {
                     self.completed_systems
-                        .union_with(&schedule.systems_in_sets_with_conditions[set_idx]);
+                        .union_with(&executable.systems_in_sets_with_conditions[set_idx]);
                 }
 
                 should_run &= set_conditions_met;
@@ -80,12 +82,14 @@ impl SystemExecutor for SimpleExecutor {
             }
 
             // evaluate system's conditions
-            let system_conditions_met =
-                evaluate_and_fold_conditions(&mut schedule.system_conditions[system_index], world);
+            let system_conditions_met = evaluate_and_fold_conditions(
+                &mut executable.system_conditions[system_index],
+                world,
+            );
 
             should_run &= system_conditions_met;
 
-            let system = &mut schedule.systems[system_index];
+            let system = &mut executable.systems[system_index];
             if should_run {
                 let valid_params = system.validate_param(world);
                 should_run &= valid_params;
@@ -172,7 +176,7 @@ fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &mut W
 fn skip_automatic_sync_points() {
     // Schedules automatically insert ApplyDeferred systems, but these should
     // not be executed as they only serve as markers and are not initialized
-    use crate::prelude::*;
+    use crate::{prelude::*, schedule::default::IntoChainableNodeConfigs};
     let mut sched = Schedule::default();
     sched.set_executor_kind(ExecutorKind::Simple);
     sched.add_systems((|_: Commands| (), || ()).chain());

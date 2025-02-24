@@ -18,7 +18,10 @@ use crate::{
     prelude::Resource,
     query::Access,
     result::{Error, Result, SystemErrorContext},
-    schedule::{is_apply_deferred, BoxedCondition, ExecutorKind, SystemExecutor, SystemSchedule},
+    schedule::{
+        default::{DefaultGraph, DefaultGraphExecutable},
+        is_apply_deferred, BoxedCondition, ExecutorKind, ScheduleExecutor,
+    },
     system::ScheduleSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
@@ -43,17 +46,18 @@ struct Conditions<'a> {
 impl<'env, 'sys> Environment<'env, 'sys> {
     fn new(
         executor: &'env MultiThreadedExecutor,
-        schedule: &'sys mut SystemSchedule,
+        executable: &'sys mut DefaultGraphExecutable,
         world: &'env mut World,
     ) -> Self {
         Environment {
             executor,
-            systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
+            systems: SyncUnsafeCell::from_mut(executable.systems.as_mut_slice())
+                .as_slice_of_cells(),
             conditions: SyncUnsafeCell::new(Conditions {
-                system_conditions: &mut schedule.system_conditions,
-                set_conditions: &mut schedule.set_conditions,
-                sets_with_conditions_of_systems: &schedule.sets_with_conditions_of_systems,
-                systems_in_sets_with_conditions: &schedule.systems_in_sets_with_conditions,
+                system_conditions: &mut executable.system_conditions,
+                set_conditions: &mut executable.set_conditions,
+                sets_with_conditions_of_systems: &executable.sets_with_conditions_of_systems,
+                systems_in_sets_with_conditions: &executable.systems_in_sets_with_conditions,
             }),
             world_cell: world.as_unsafe_world_cell(),
         }
@@ -141,16 +145,16 @@ impl Default for MultiThreadedExecutor {
     }
 }
 
-impl SystemExecutor for MultiThreadedExecutor {
+impl ScheduleExecutor<DefaultGraph> for MultiThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::MultiThreaded
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, executable: &DefaultGraphExecutable) {
         let state = self.state.get_mut().unwrap();
         // pre-allocate space
-        let sys_count = schedule.system_ids.len();
-        let set_count = schedule.set_ids.len();
+        let sys_count = executable.system_ids.len();
+        let set_count = executable.set_ids.len();
 
         self.system_completion = ConcurrentQueue::bounded(sys_count.max(1));
         self.starting_systems = FixedBitSet::with_capacity(sys_count);
@@ -166,11 +170,11 @@ impl SystemExecutor for MultiThreadedExecutor {
         for index in 0..sys_count {
             state.system_task_metadata.push(SystemTaskMetadata {
                 archetype_component_access: default(),
-                dependents: schedule.system_dependents[index].clone(),
-                is_send: schedule.systems[index].is_send(),
-                is_exclusive: schedule.systems[index].is_exclusive(),
+                dependents: executable.system_dependents[index].clone(),
+                is_send: executable.systems[index].is_send(),
+                is_exclusive: executable.systems[index].is_exclusive(),
             });
-            if schedule.system_dependencies[index] == 0 {
+            if executable.system_dependencies[index] == 0 {
                 self.starting_systems.insert(index);
             }
         }
@@ -180,20 +184,20 @@ impl SystemExecutor for MultiThreadedExecutor {
 
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        executable: &mut DefaultGraphExecutable,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: fn(Error, SystemErrorContext),
     ) {
         let state = self.state.get_mut().unwrap();
         // reset counts
-        if schedule.systems.is_empty() {
+        if executable.systems.is_empty() {
             return;
         }
         state.num_running_systems = 0;
         state
             .num_dependencies_remaining
-            .clone_from(&schedule.system_dependencies);
+            .clone_from(&executable.system_dependencies);
         state.ready_systems.clone_from(&self.starting_systems);
 
         // If stepping is enabled, make sure we skip those systems that should
@@ -217,7 +221,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             .map(|e| e.0.clone());
         let thread_executor = thread_executor.as_deref();
 
-        let environment = &Environment::new(self, schedule, world);
+        let environment = &Environment::new(self, executable, world);
 
         ComputeTaskPool::get_or_init(TaskPool::default).scope_with_executor(
             false,
@@ -804,7 +808,10 @@ impl MainThreadExecutor {
 mod tests {
     use crate::{
         prelude::Resource,
-        schedule::{ExecutorKind, IntoSystemConfigs, Schedule},
+        schedule::{
+            default::{IntoChainableNodeConfigs, IntoConditionalNodeConfigs},
+            ExecutorKind, Schedule,
+        },
         system::Commands,
         world::World,
     };

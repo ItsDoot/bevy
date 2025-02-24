@@ -1,4 +1,5 @@
 use bevy::{app::MainScheduleOrder, ecs::schedule::*, prelude::*};
+use bevy_ecs::schedule::default::NodeId;
 
 /// Independent [`Schedule`] for stepping systems.
 ///

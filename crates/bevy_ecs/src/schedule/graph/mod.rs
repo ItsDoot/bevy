@@ -13,11 +13,26 @@ use fixedbitset::FixedBitSet;
 use crate::schedule::{set::*, traits::GraphNodeId};
 
 mod graph_map;
-mod node;
 mod tarjan_scc;
 
 pub use graph_map::{DiGraph, Direction, UnGraph};
-pub use node::NodeId;
+
+/// A directed acyclic graph structure.
+pub struct Dag<Id: GraphNodeId> {
+    /// A directed graph.
+    pub graph: DiGraph<Id>,
+    /// A cached topological ordering of the graph.
+    pub topsort: Vec<Id>,
+}
+
+impl<Id: GraphNodeId> Default for Dag<Id> {
+    fn default() -> Self {
+        Self {
+            graph: Default::default(),
+            topsort: Default::default(),
+        }
+    }
+}
 
 /// Specifies what kind of edge should be added to the dependency graph.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -58,16 +73,6 @@ pub(crate) enum Ambiguity {
     IgnoreWithSet(Vec<InternedSystemSet>),
     /// Ignore all warnings.
     IgnoreAll,
-}
-
-/// Metadata about how the node fits in the schedule graph
-#[derive(Default)]
-pub(crate) struct GraphInfo {
-    /// the sets that the node belongs to (hierarchy)
-    pub(crate) hierarchy: Vec<InternedSystemSet>,
-    /// the sets that the node depends on (must run before or after)
-    pub(crate) dependencies: Vec<Dependency>,
-    pub(crate) ambiguous_with: Ambiguity,
 }
 
 /// Converts 2D row-major pair of indices into a 1D array index.

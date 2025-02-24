@@ -19,22 +19,32 @@ use crate::{
     prelude::{IntoSystemSet, SystemSet},
     query::Access,
     result::{Error, Result, SystemErrorContext},
-    schedule::{BoxedCondition, InternedSystemSet, NodeId, SystemTypeSet},
+    schedule::{traits::ScheduleGraph, InternedSystemSet, SystemTypeSet},
     system::{ScheduleSystem, System, SystemIn},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
-/// Types that can run a [`SystemSchedule`] on a [`World`].
-pub(super) trait SystemExecutor: Send + Sync {
-    fn kind(&self) -> ExecutorKind;
-    fn init(&mut self, schedule: &SystemSchedule);
+/// Types that can run a [`DefaultGraphExecutable`] on a [`World`].
+///
+/// [`DefaultGraphExecutable`]: crate::schedule::default::DefaultGraphExecutable
+pub trait ScheduleExecutor<G: ScheduleGraph>: Send + Sync {
+    /// The kind of executor.
+    fn kind(&self) -> G::ExecutorKind;
+
+    /// Initializes the executor with the given [`Executable`].
+    fn init(&mut self, schedule: &G::Executable);
+
+    /// Runs the [`Executable`] on the given [`World`].
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        schedule: &mut G::Executable,
         world: &mut World,
         skip_systems: Option<&FixedBitSet>,
         error_handler: fn(Error, SystemErrorContext),
     );
+
+    /// Sets whether the executor should apply deferred system buffers at the
+    /// end of the schedule run.
     fn set_apply_final_deferred(&mut self, value: bool);
 }
 
@@ -58,64 +68,6 @@ pub enum ExecutorKind {
     #[cfg(feature = "std")]
     #[cfg_attr(all(not(target_arch = "wasm32"), feature = "multi_threaded"), default)]
     MultiThreaded,
-}
-
-/// Holds systems and conditions of a [`Schedule`](super::Schedule) sorted in topological order
-/// (along with dependency information for `multi_threaded` execution).
-///
-/// Since the arrays are sorted in the same order, elements are referenced by their index.
-/// [`FixedBitSet`] is used as a smaller, more efficient substitute of `HashSet<usize>`.
-#[derive(Default)]
-pub struct SystemSchedule {
-    /// List of system node ids.
-    pub(super) system_ids: Vec<NodeId>,
-    /// Indexed by system node id.
-    pub(super) systems: Vec<ScheduleSystem>,
-    /// Indexed by system node id.
-    pub(super) system_conditions: Vec<Vec<BoxedCondition>>,
-    /// Indexed by system node id.
-    /// Number of systems that the system immediately depends on.
-    #[cfg_attr(
-        not(feature = "std"),
-        expect(dead_code, reason = "currently only used with the std feature")
-    )]
-    pub(super) system_dependencies: Vec<usize>,
-    /// Indexed by system node id.
-    /// List of systems that immediately depend on the system.
-    #[cfg_attr(
-        not(feature = "std"),
-        expect(dead_code, reason = "currently only used with the std feature")
-    )]
-    pub(super) system_dependents: Vec<Vec<usize>>,
-    /// Indexed by system node id.
-    /// List of sets containing the system that have conditions
-    pub(super) sets_with_conditions_of_systems: Vec<FixedBitSet>,
-    /// List of system set node ids.
-    pub(super) set_ids: Vec<NodeId>,
-    /// Indexed by system set node id.
-    pub(super) set_conditions: Vec<Vec<BoxedCondition>>,
-    /// Indexed by system set node id.
-    /// List of systems that are in sets that have conditions.
-    ///
-    /// If a set doesn't run because of its conditions, this is used to skip all systems in it.
-    pub(super) systems_in_sets_with_conditions: Vec<FixedBitSet>,
-}
-
-impl SystemSchedule {
-    /// Creates an empty [`SystemSchedule`].
-    pub const fn new() -> Self {
-        Self {
-            systems: Vec::new(),
-            system_conditions: Vec::new(),
-            set_conditions: Vec::new(),
-            system_ids: Vec::new(),
-            set_ids: Vec::new(),
-            system_dependencies: Vec::new(),
-            system_dependents: Vec::new(),
-            sets_with_conditions_of_systems: Vec::new(),
-            systems_in_sets_with_conditions: Vec::new(),
-        }
-    }
 }
 
 /// See [`ApplyDeferred`].
@@ -312,8 +264,13 @@ mod __rust_begin_short_backtrace {
 #[cfg(test)]
 mod tests {
     use crate::{
-        prelude::{IntoSystemConfigs, IntoSystemSetConfigs, Resource, Schedule, SystemSet},
-        schedule::ExecutorKind,
+        prelude::{Resource, Schedule, SystemSet},
+        schedule::{
+            default::{
+                IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoOrderedNodeConfigs,
+            },
+            ExecutorKind,
+        },
         system::{Commands, Res, WithParamWarnPolicy},
         world::World,
     };

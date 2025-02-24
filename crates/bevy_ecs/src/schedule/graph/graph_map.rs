@@ -304,8 +304,9 @@ impl Direction {
 mod tests {
     use alloc::vec;
 
+    use crate::schedule::default::NodeId;
+
     use super::*;
-    use crate::schedule::NodeId;
 
     /// The `Graph` type _must_ preserve the order that nodes are inserted in if
     /// no removals occur. Removals are permitted to swap the latest node into the
