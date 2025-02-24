@@ -132,7 +132,7 @@ impl<G: ScheduleGraph> Schedules<G> {
     pub fn process_nodes<N: GraphNode<G>, M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        nodes: impl IntoNodeConfigs<N, G, M>,
+        nodes: impl IntoNodeConfigs<N, M>,
     ) -> &mut Self {
         self.entry(schedule).process_nodes(nodes);
         self
@@ -142,7 +142,7 @@ impl<G: ScheduleGraph> Schedules<G> {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoNodeConfigs<ScheduledSystem, G, M>,
+        systems: impl IntoNodeConfigs<ScheduledSystem, M>,
     ) -> &mut Self
     where
         ScheduledSystem: GraphNode<G>,
@@ -155,7 +155,7 @@ impl<G: ScheduleGraph> Schedules<G> {
     pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoNodeConfigs<ScheduledSystemSet, G, M>,
+        sets: impl IntoNodeConfigs<ScheduledSystemSet, M>,
     ) -> &mut Self
     where
         ScheduledSystemSet: GraphNode<G>,
@@ -304,17 +304,14 @@ impl<G: ScheduleGraph> Schedule<G> {
     /// Processes configured nodes and adds them to the graph.
     pub fn process_nodes<N: GraphNode<G>, M>(
         &mut self,
-        nodes: impl IntoNodeConfigs<N, G, M>,
+        nodes: impl IntoNodeConfigs<N, M>,
     ) -> &mut Self {
         N::process_configs(&mut self.graph, nodes.into_configs(), false).unwrap();
         self
     }
 
     /// Add a collection of systems to the schedule.
-    pub fn add_systems<M>(
-        &mut self,
-        systems: impl IntoNodeConfigs<ScheduledSystem, G, M>,
-    ) -> &mut Self
+    pub fn add_systems<M>(&mut self, systems: impl IntoNodeConfigs<ScheduledSystem, M>) -> &mut Self
     where
         ScheduledSystem: GraphNode<G>,
     {
@@ -325,7 +322,7 @@ impl<G: ScheduleGraph> Schedule<G> {
     #[track_caller]
     pub fn configure_sets<M>(
         &mut self,
-        sets: impl IntoNodeConfigs<ScheduledSystemSet, G, M>,
+        sets: impl IntoNodeConfigs<ScheduledSystemSet, M>,
     ) -> &mut Self
     where
         ScheduledSystemSet: GraphNode<G>,

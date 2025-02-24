@@ -8,7 +8,7 @@ use crate::{
     schedule::{
         graph::{Ambiguity, Dependency, DependencyKind},
         passes::IgnoreDeferred,
-        traits::{GraphNode, ScheduleGraph},
+        traits::NodeType,
         BoxedCondition, Condition, InternedSystemSet, IntoNodeConfigs, IntoSystemSet, NodeConfigs,
         SystemSet,
     },
@@ -150,7 +150,7 @@ impl Chain {
     }
 }
 
-impl<N: GraphNode<G, Metadata: AsMut<GraphInfo>>, G: ScheduleGraph> NodeConfigs<N, G> {
+impl<N: NodeType<Metadata: AsMut<GraphInfo>>> NodeConfigs<N> {
     /// Adds a new boxed system set to the systems.
     pub(crate) fn in_set_inner(&mut self, set: InternedSystemSet) {
         match self {
@@ -260,7 +260,7 @@ impl<N: GraphNode<G, Metadata: AsMut<GraphInfo>>, G: ScheduleGraph> NodeConfigs<
     }
 }
 
-impl<N: GraphNode<G>, G: ScheduleGraph> NodeConfigs<N, G> {
+impl<N: NodeType> NodeConfigs<N> {
     pub(crate) fn distributive_run_if_inner<In, M>(
         &mut self,
         condition: impl Condition<M, In> + Clone,
@@ -301,7 +301,7 @@ impl<N: GraphNode<G>, G: ScheduleGraph> NodeConfigs<N, G> {
     }
 }
 
-impl<N: GraphNode<G, GroupMetadata: AsMut<Chain>>, G: ScheduleGraph> NodeConfigs<N, G> {
+impl<N: NodeType<GroupMetadata: AsMut<Chain>>> NodeConfigs<N> {
     pub(crate) fn chain_inner(&mut self) {
         match self {
             Self::Single(_) => { /* no op */ }
@@ -322,14 +322,13 @@ impl<N: GraphNode<G, GroupMetadata: AsMut<Chain>>, G: ScheduleGraph> NodeConfigs
 }
 
 /// [`GraphNode`]s that can be configured to run in a specific order.
-pub trait IntoOrderedNodeConfigs<N, G, Marker>: IntoNodeConfigs<N, G, Marker>
+pub trait IntoOrderedNodeConfigs<N, Marker>: IntoNodeConfigs<N, Marker>
 where
-    N: GraphNode<G, Metadata: AsMut<GraphInfo>>,
-    G: ScheduleGraph,
+    N: NodeType<Metadata: AsMut<GraphInfo>>,
 {
     /// Add these systems to the provided `set`.
     #[track_caller]
-    fn in_set(self, set: impl SystemSet) -> NodeConfigs<N, G> {
+    fn in_set(self, set: impl SystemSet) -> NodeConfigs<N> {
         assert!(
             set.system_type().is_none(),
             "adding arbitrary systems to a system type set is not allowed"
@@ -348,7 +347,7 @@ where
     ///
     /// Calling [`.chain`](Self::chain) is often more convenient and ensures that all systems are added to the schedule.
     /// Please check the [caveats section of `.after`](Self::after) for details.
-    fn before<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N, G> {
+    fn before<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N> {
         let set = set.into_system_set();
         let mut configs = self.into_configs();
         configs.before_inner(set.intern());
@@ -378,7 +377,7 @@ where
     /// any ordering calls between them—whether using `.before`, `.after`, or `.chain`—will be silently ignored.
     ///
     /// [`configure_sets`]: https://docs.rs/bevy/latest/bevy/app/struct.App.html#method.configure_sets
-    fn after<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N, G> {
+    fn after<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N> {
         let set = set.into_system_set();
         let mut configs = self.into_configs();
         configs.after_inner(set.intern());
@@ -389,7 +388,7 @@ where
     ///
     /// Unlike [`before`](Self::before), this will not cause the systems in
     /// `set` to wait for the deferred effects of `self` to be applied.
-    fn before_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N, G> {
+    fn before_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N> {
         let set = set.into_system_set();
         let mut configs = self.into_configs();
         configs.before_ignore_deferred_inner(set.intern());
@@ -400,7 +399,7 @@ where
     ///
     /// Unlike [`after`](Self::after), this will not wait for the deferred
     /// effects of systems in `set` to be applied.
-    fn after_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N, G> {
+    fn after_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N> {
         let set = set.into_system_set();
         let mut configs = self.into_configs();
         configs.after_ignore_deferred_inner(set.intern());
@@ -409,7 +408,7 @@ where
 
     /// Suppress warnings and errors that would result from these systems having ambiguities
     /// (conflicting access but indeterminate order) with systems in `set`.
-    fn ambiguous_with<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N, G> {
+    fn ambiguous_with<M>(self, set: impl IntoSystemSet<M>) -> NodeConfigs<N> {
         let set = set.into_system_set();
         let mut configs = self.into_configs();
         configs.ambiguous_with_inner(set.intern());
@@ -418,26 +417,24 @@ where
 
     /// Suppress warnings and errors that would result from these systems having ambiguities
     /// (conflicting access but indeterminate order) with any other system.
-    fn ambiguous_with_all(self) -> NodeConfigs<N, G> {
+    fn ambiguous_with_all(self) -> NodeConfigs<N> {
         let mut configs = self.into_configs();
         configs.ambiguous_with_all_inner();
         configs
     }
 }
 
-impl<N, G, M, I> IntoOrderedNodeConfigs<N, G, M> for I
+impl<N, M, I> IntoOrderedNodeConfigs<N, M> for I
 where
-    N: GraphNode<G, Metadata: AsMut<GraphInfo>>,
-    G: ScheduleGraph,
-    I: IntoNodeConfigs<N, G, M>,
+    N: NodeType<Metadata: AsMut<GraphInfo>>,
+    I: IntoNodeConfigs<N, M>,
 {
 }
 
 /// [`GraphNode`]s that can be configured to run conditionally.
-pub trait IntoConditionalNodeConfigs<N, G, Marker, In = ()>: IntoNodeConfigs<N, G, Marker>
+pub trait IntoConditionalNodeConfigs<N, Marker, In = ()>: IntoNodeConfigs<N, Marker>
 where
-    N: GraphNode<G, Metadata: AsMut<Conditions<In>>, GroupMetadata: AsMut<Conditions<In>>>,
-    G: ScheduleGraph,
+    N: NodeType<Metadata: AsMut<Conditions<In>>, GroupMetadata: AsMut<Conditions<In>>>,
     In: SystemInput,
 {
     /// Add a run condition to each contained system.
@@ -470,7 +467,7 @@ where
     /// Use [`run_if`](IntoSystemSetConfigs::run_if) on a [`SystemSet`] if you want to make sure
     /// that either all or none of the systems are run, or you don't want to evaluate the run
     /// condition for each contained system separately.
-    fn distributive_run_if<M>(self, condition: impl Condition<M, In> + Clone) -> NodeConfigs<N, G> {
+    fn distributive_run_if<M>(self, condition: impl Condition<M, In> + Clone) -> NodeConfigs<N> {
         let mut configs = self.into_configs();
         configs.distributive_run_if_inner(condition);
         configs
@@ -506,27 +503,25 @@ where
     ///
     /// Use [`distributive_run_if`](IntoSystemConfigs::distributive_run_if) if you want the
     /// condition to be evaluated for each individual system, right before one is run.
-    fn run_if<M>(self, condition: impl Condition<M, In>) -> NodeConfigs<N, G> {
+    fn run_if<M>(self, condition: impl Condition<M, In>) -> NodeConfigs<N> {
         let mut configs = self.into_configs();
         configs.run_if_dyn(new_condition(condition));
         configs
     }
 }
 
-impl<N, G, M, In, I> IntoConditionalNodeConfigs<N, G, M, In> for I
+impl<N, M, In, I> IntoConditionalNodeConfigs<N, M, In> for I
 where
-    N: GraphNode<G, Metadata: AsMut<Conditions<In>>, GroupMetadata: AsMut<Conditions<In>>>,
-    G: ScheduleGraph,
+    N: NodeType<Metadata: AsMut<Conditions<In>>, GroupMetadata: AsMut<Conditions<In>>>,
     In: SystemInput,
-    I: IntoNodeConfigs<N, G, M>,
+    I: IntoNodeConfigs<N, M>,
 {
 }
 
 /// [`GraphNode`]s that can be configured to run in a specific order, chained together in a group.
-pub trait IntoChainableNodeConfigs<N, G, Marker>: IntoNodeConfigs<N, G, Marker>
+pub trait IntoChainableNodeConfigs<N, Marker>: IntoNodeConfigs<N, Marker>
 where
-    N: GraphNode<G, GroupMetadata: AsMut<Chain>>,
-    G: ScheduleGraph,
+    N: NodeType<GroupMetadata: AsMut<Chain>>,
 {
     /// Treat this collection as a sequence of systems.
     ///
@@ -535,7 +530,7 @@ where
     /// If the preceding node on an edge has deferred parameters, an [`ApplyDeferred`](crate::schedule::ApplyDeferred)
     /// will be inserted on the edge. If this behavior is not desired consider using
     /// [`chain_ignore_deferred`](Self::chain_ignore_deferred) instead.
-    fn chain(self) -> NodeConfigs<N, G> {
+    fn chain(self) -> NodeConfigs<N> {
         let mut configs = self.into_configs();
         configs.chain_inner();
         configs
@@ -546,17 +541,16 @@ where
     /// Ordering constraints will be applied between the successive elements.
     ///
     /// Unlike [`chain`](Self::chain) this will **not** add [`ApplyDeferred`](crate::schedule::ApplyDeferred) on the edges.
-    fn chain_ignore_deferred(self) -> NodeConfigs<N, G> {
+    fn chain_ignore_deferred(self) -> NodeConfigs<N> {
         let mut configs = self.into_configs();
         configs.chain_ignore_deferred_inner();
         configs
     }
 }
 
-impl<N, G, M, I> IntoChainableNodeConfigs<N, G, M> for I
+impl<N, M, I> IntoChainableNodeConfigs<N, M> for I
 where
-    N: GraphNode<G, GroupMetadata: AsMut<Chain>>,
-    G: ScheduleGraph,
-    I: IntoNodeConfigs<N, G, M>,
+    N: NodeType<GroupMetadata: AsMut<Chain>>,
+    I: IntoNodeConfigs<N, M>,
 {
 }

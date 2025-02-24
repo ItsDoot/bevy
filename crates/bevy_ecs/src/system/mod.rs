@@ -342,9 +342,7 @@ mod tests {
         result::Result,
         schedule::{
             common_conditions::resource_exists,
-            default::{
-                DefaultGraph, IntoChainableNodeConfigs, IntoConditionalNodeConfigs, ScheduledSystem,
-            },
+            default::{IntoChainableNodeConfigs, IntoConditionalNodeConfigs, ScheduledSystem},
             ApplyDeferred, Condition, IntoNodeConfigs, Schedule,
         },
         system::{
@@ -392,7 +390,7 @@ mod tests {
         system.run((), &mut world);
     }
 
-    fn run_system<Marker, S: IntoNodeConfigs<ScheduledSystem, DefaultGraph, Marker>>(
+    fn run_system<Marker, S: IntoNodeConfigs<ScheduledSystem, Marker>>(
         world: &mut World,
         system: S,
     ) {

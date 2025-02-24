@@ -5,7 +5,7 @@ use bevy_ecs::{
     prelude::*,
     result::{DefaultSystemErrorHandler, SystemErrorContext},
     schedule::{
-        default::{DefaultGraph, ScheduledSystem, ScheduledSystemSet},
+        default::{ScheduledSystem, ScheduledSystemSet},
         traits::ScheduleGraph,
         InternedScheduleLabel, ScheduleLabel,
     },
@@ -216,7 +216,7 @@ impl SubApp {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoNodeConfigs<ScheduledSystem, DefaultGraph, M>,
+        systems: impl IntoNodeConfigs<ScheduledSystem, M>,
     ) -> &mut Self {
         let mut schedules = self.world.resource_mut::<Schedules>();
         schedules.add_systems(schedule, systems);
@@ -241,7 +241,7 @@ impl SubApp {
     pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoNodeConfigs<ScheduledSystemSet, DefaultGraph, M>,
+        sets: impl IntoNodeConfigs<ScheduledSystemSet, M>,
     ) -> &mut Self {
         let mut schedules = self.world.resource_mut::<Schedules>();
         schedules.configure_sets(schedule, sets);

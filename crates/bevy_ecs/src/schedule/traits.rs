@@ -59,7 +59,6 @@ pub trait ScheduleGraph: Default + Send + Sync + 'static {
     fn initialize(&mut self, world: &mut World);
 
     /// Updates the [`ScheduleExecutable`] based on the current state of the graph.
-    // TODO: add ignored_ambiguities argument
     fn update(
         &mut self,
         world: &mut World,
@@ -84,25 +83,30 @@ pub trait ScheduleExecutable: Default + Send + Sync + 'static {
     fn check_change_ticks(&mut self, change_tick: Tick);
 }
 
-/// Trait for nodes to define how they get processed by a [`ScheduleGraph`].
-pub trait GraphNode<G: ScheduleGraph>: Sized {
+/// Trait for types that can be converted into a [`NodeConfig`] with additional
+/// metadata.
+pub trait NodeType: Sized {
     /// Additional data used to configure a node.
     type Metadata;
     /// Additional data used to configure a group of nodes.
     type GroupMetadata: Default;
+
+    /// Converts this node into a configuration.
+    fn into_config(self) -> NodeConfig<Self>;
+}
+
+/// Trait for nodes to define how they get processed by a [`ScheduleGraph`].
+pub trait GraphNode<G: ScheduleGraph>: NodeType {
     /// Extra data returned when processing a group of nodes.
     type ProcessData;
 
-    /// Converts this node into a configuration.
-    fn into_config(self) -> NodeConfig<Self, G>;
-
     /// Processes a single node of this type and adds it to the graph.
-    fn process_config(graph: &mut G, config: NodeConfig<Self, G>) -> Result<G::Id, G::BuildError>;
+    fn process_config(graph: &mut G, config: NodeConfig<Self>) -> Result<G::Id, G::BuildError>;
 
     /// Processes one or more nodes of this type and adds them to the graph.
     fn process_configs(
         graph: &mut G,
-        configs: NodeConfigs<Self, G>,
+        configs: NodeConfigs<Self>,
         collect_nodes: bool,
     ) -> Result<ProcessedConfigs<Self, G>, G::BuildError>;
 }
