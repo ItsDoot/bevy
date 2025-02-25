@@ -1,7 +1,15 @@
-use alloc::{vec, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
+
 use variadics_please::all_tuples;
 
-use crate::schedule::traits::{GraphNode, ScheduleGraph};
+use crate::{
+    result::Result,
+    schedule::{
+        traits::{GraphNode, ScheduleGraph},
+        InternedSystemSet, SystemSet,
+    },
+    system::{BoxedSystem, InfallibleSystemWrapper, IntoSystem, SystemInput},
+};
 
 /// Stores configuration for a single generic node (a system or a system set)
 ///
@@ -129,3 +137,64 @@ all_tuples!(
     P,
     S
 );
+
+/// Marker component to allow for conflicting implementations of [`IntoNodeConfigs`]
+#[doc(hidden)]
+pub struct Infallible;
+
+impl<In, Out, G, F, Marker> IntoNodeConfigs<BoxedSystem<In, Result<Out>>, G, (Infallible, Marker)>
+    for F
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    BoxedSystem<In, Result<Out>>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Out, Marker>,
+{
+    fn into_configs(self) -> NodeConfigs<BoxedSystem<In, Result<Out>>, G> {
+        let system = Box::new(InfallibleSystemWrapper::new(IntoSystem::into_system(self)))
+            as BoxedSystem<In, Result<Out>>;
+        NodeConfigs::Single(system.into_config())
+    }
+}
+
+/// Marker component to allow for conflicting implementations of [`IntoNodeConfigs`]
+#[doc(hidden)]
+pub struct Fallible;
+
+impl<In, Out, G, F, Marker> IntoNodeConfigs<BoxedSystem<In, Result<Out>>, G, (Fallible, Marker)>
+    for F
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    BoxedSystem<In, Result<Out>>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Result<Out>, Marker>,
+{
+    fn into_configs(self) -> NodeConfigs<BoxedSystem<In, Result<Out>>, G> {
+        let system = Box::new(IntoSystem::into_system(self)) as BoxedSystem<In, Result<Out>>;
+        NodeConfigs::Single(system.into_config())
+    }
+}
+
+impl<In, Out, G> IntoNodeConfigs<BoxedSystem<In, Result<Out>>, G, ()>
+    for BoxedSystem<In, Result<Out>>
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    BoxedSystem<In, Result<Out>>: GraphNode<G>,
+    G: ScheduleGraph,
+{
+    fn into_configs(self) -> NodeConfigs<BoxedSystem<In, Result<Out>>, G> {
+        NodeConfigs::Single(self.into_config())
+    }
+}
+
+impl<S: SystemSet, G: ScheduleGraph> IntoNodeConfigs<InternedSystemSet, G, ()> for S
+where
+    InternedSystemSet: GraphNode<G>,
+{
+    fn into_configs(self) -> NodeConfigs<InternedSystemSet, G> {
+        NodeConfigs::Single(self.intern().into_config())
+    }
+}

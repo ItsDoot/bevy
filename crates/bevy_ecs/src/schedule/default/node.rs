@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use core::fmt::{self, Debug};
 
 use crate::{
@@ -10,13 +9,10 @@ use crate::{
             GraphInfo,
         },
         graph::Direction,
-        traits::{
-            DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, ProcessedConfigs,
-            ScheduleGraph,
-        },
-        InternedSystemSet, IntoNodeConfigs, NodeConfig, NodeConfigs,
+        traits::{DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, ProcessedConfigs},
+        InternedSystemSet, NodeConfig, NodeConfigs,
     },
-    system::{BoxedSystem, InfallibleSystemWrapper, IntoSystem, SystemInput},
+    system::BoxedSystem,
 };
 
 /// [`DefaultGraph`] [`GraphNode`] for inserting systems into the schedule.
@@ -62,49 +58,6 @@ impl GraphNode<DefaultGraph> for ScheduledSystem {
     }
 }
 
-/// Marker component to allow for conflicting implementations of [`IntoSystemConfigs`]
-#[doc(hidden)]
-pub struct Infallible;
-
-impl<In, Out, G, F, Marker> IntoNodeConfigs<ScheduledSystem<In, Out>, G, (Infallible, Marker)> for F
-where
-    In: SystemInput + 'static,
-    Out: 'static,
-    ScheduledSystem<In, Out>: GraphNode<G>,
-    G: ScheduleGraph,
-    F: IntoSystem<In, Out, Marker>,
-{
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem<In, Out>, G> {
-        let system = Box::new(InfallibleSystemWrapper::new(IntoSystem::into_system(self)))
-            as ScheduledSystem<In, Out>;
-        NodeConfigs::Single(system.into_config())
-    }
-}
-
-/// Marker component to allow for conflicting implementations of [`IntoSystemConfigs`]
-#[doc(hidden)]
-pub struct Fallible;
-
-impl<In, Out, G, F, Marker> IntoNodeConfigs<ScheduledSystem<In, Out>, G, (Fallible, Marker)> for F
-where
-    In: SystemInput + 'static,
-    Out: 'static,
-    ScheduledSystem<In, Out>: GraphNode<G>,
-    G: ScheduleGraph,
-    F: IntoSystem<In, Result<Out>, Marker>,
-{
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem<In, Out>, G> {
-        let system = Box::new(IntoSystem::into_system(self)) as ScheduledSystem<In, Out>;
-        NodeConfigs::Single(system.into_config())
-    }
-}
-
-impl IntoNodeConfigs<ScheduledSystem, DefaultGraph, ()> for BoxedSystem<(), Result> {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem, DefaultGraph> {
-        NodeConfigs::Single(self.into_config())
-    }
-}
-
 /// [`DefaultGraph`] [`GraphNode`] for inserting system sets into the schedule.
 pub type ScheduledSystemSet = InternedSystemSet;
 
@@ -143,12 +96,6 @@ impl GraphNode<DefaultGraph> for ScheduledSystemSet {
         collect_nodes: bool,
     ) -> Result<ProcessedConfigs<Self, DefaultGraph>, DefaultBuildError> {
         graph.process_configs(configs, collect_nodes)
-    }
-}
-
-impl<S: SystemSet> IntoNodeConfigs<ScheduledSystemSet, DefaultGraph, ()> for S {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystemSet, DefaultGraph> {
-        NodeConfigs::Single(self.intern().into_config())
     }
 }
 

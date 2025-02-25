@@ -7,7 +7,7 @@ use crate::{
     prelude::{Bundle, Trigger},
     query::Access,
     result::Result,
-    schedule::default::{Fallible, Infallible},
+    schedule::{Fallible, Infallible},
     system::{input::SystemIn, System},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
