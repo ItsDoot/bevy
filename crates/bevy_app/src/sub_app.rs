@@ -5,8 +5,7 @@ use bevy_ecs::{
     prelude::*,
     result::{DefaultSystemErrorHandler, SystemErrorContext},
     schedule::{
-        default::{DefaultGraph, ScheduledSystem, ScheduledSystemSet},
-        traits::ScheduleGraph,
+        default::{DefaultBuildSettings, DefaultGraph, ScheduledSystem, ScheduledSystemSet},
         InternedScheduleLabel, ScheduleLabel,
     },
     system::{SystemId, SystemInput},
@@ -298,12 +297,12 @@ impl SubApp {
     }
 
     /// See [`App::configure_schedules`].
-    pub fn configure_schedules<G: ScheduleGraph>(
+    pub fn configure_schedules(
         &mut self,
-        schedule_build_settings: G::BuildSettings,
+        schedule_build_settings: DefaultBuildSettings,
     ) -> &mut Self {
         self.world_mut()
-            .resource_mut::<Schedules<G>>()
+            .resource_mut::<Schedules<DefaultGraph>>()
             .configure_schedules(schedule_build_settings);
         self
     }

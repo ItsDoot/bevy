@@ -20,7 +20,7 @@ use crate::{
         default::{
             DefaultGraph, IgnoredSchedulingAmbiguities, NodeId, ScheduledSystem, ScheduledSystemSet,
         },
-        traits::{GraphNode, ScheduleExecutable, ScheduleGraph},
+        traits::{EcsScheduleGraph, GraphNode, ScheduleExecutable, ScheduleGraph},
         *,
     },
     system::ScheduleSystem,
@@ -386,12 +386,16 @@ impl<G: ScheduleGraph> Schedule<G> {
     }
 
     /// Runs all systems in this schedule on the `world`, using its current execution strategy.
-    pub fn run(&mut self, world: &mut World) {
+    pub fn run_with(
+        &mut self,
+        world: &mut World,
+        global_metadata: impl FnOnce(&mut World) -> G::GlobalMetadata,
+    ) {
         #[cfg(feature = "trace")]
         let _span = info_span!("schedule", name = ?self.label).entered();
 
         world.check_change_ticks();
-        self.initialize(world)
+        self.initialize_with(world, global_metadata)
             .unwrap_or_else(|e| panic!("Error when initializing schedule {:?}: {e}", self.label));
 
         let error_handler = self.error_handler.expect("schedule initialized");
@@ -420,13 +424,14 @@ impl<G: ScheduleGraph> Schedule<G> {
     /// and re-initializes the executor.
     ///
     /// Moves all systems and run conditions out of the [`ScheduleGraph`].
-    pub fn initialize(&mut self, world: &mut World) -> Result<(), G::BuildError> {
+    pub fn initialize_with(
+        &mut self,
+        world: &mut World,
+        global_metadata: impl FnOnce(&mut World) -> G::GlobalMetadata,
+    ) -> Result<(), G::BuildError> {
         if self.graph.changed() {
             self.graph.initialize(world);
-            let global_metadata = world
-                .get_resource_or_init::<Schedules<G>>()
-                .metadata
-                .clone();
+            let global_metadata = global_metadata(world);
             self.graph
                 .update(world, &mut self.executable, &global_metadata, self.label)?;
             self.graph.set_changed(false);
@@ -477,6 +482,31 @@ impl<G: ScheduleGraph> Schedule<G> {
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
         self.executable.apply_deferred(world);
+    }
+}
+
+impl<G: EcsScheduleGraph> Schedule<G> {
+    /// Runs all systems in this schedule on the `world`, using its current execution strategy.
+    pub fn run(&mut self, world: &mut World) {
+        self.run_with(world, |world| {
+            world
+                .get_resource_or_init::<Schedules<G>>()
+                .metadata
+                .clone()
+        });
+    }
+
+    /// Initializes any newly-added systems and conditions, rebuilds the executable schedule,
+    /// and re-initializes the executor.
+    ///
+    /// Moves all systems and run conditions out of the [`ScheduleGraph`].
+    pub fn initialize(&mut self, world: &mut World) -> Result<(), G::BuildError> {
+        self.initialize_with(world, |world| {
+            world
+                .get_resource_or_init::<Schedules<G>>()
+                .metadata
+                .clone()
+        })
     }
 }
 

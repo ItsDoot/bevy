@@ -18,7 +18,7 @@ use crate::{
 /// execution. For an execution-optimized version, see [`ScheduleExecutable`].
 ///
 /// [`Schedule`]: super::Schedule
-pub trait ScheduleGraph: Default + Send + Sync + 'static {
+pub trait ScheduleGraph: Default {
     /// The type of unique identifier for a node in the graph.
     type Id: GraphNodeId;
     /// The type of executable container for the graph. Usually implies
@@ -32,7 +32,7 @@ pub trait ScheduleGraph: Default + Send + Sync + 'static {
     type ExecutorKind: Clone + Copy + PartialEq + Eq + Debug + Default;
     /// Metadata shared between all schedules of this type. Stored in
     /// [`Schedules`](crate::schedule2::Schedules).
-    type GlobalMetadata: Clone + Default + Send + Sync + 'static;
+    type GlobalMetadata: Clone + Default;
 
     /// Creates a new executor of the given kind.
     fn new_executor(kind: Self::ExecutorKind) -> Box<dyn ScheduleExecutor<Self>>;
@@ -68,12 +68,29 @@ pub trait ScheduleGraph: Default + Send + Sync + 'static {
     ) -> Result<(), Self::BuildError>;
 }
 
+/// Trait for easily bounding a [`ScheduleGraph`] for storing in a [`World`].
+pub trait EcsScheduleGraph:
+    ScheduleGraph<Executable: Send + Sync + 'static, GlobalMetadata: Send + Sync + 'static>
+    + Send
+    + Sync
+    + 'static
+{
+}
+
+impl<G> EcsScheduleGraph for G where
+    G: ScheduleGraph<Executable: Send + Sync + 'static, GlobalMetadata: Send + Sync + 'static>
+        + Send
+        + Sync
+        + 'static
+{
+}
+
 /// Stores nodes for a [`Schedule`] in a form optimized for execution by
 /// [`ScheduleExecutor`]s.
 ///
 /// [`Schedule`]: super::Schedule
 /// [`ScheduleExecutor`]: super::ScheduleExecutor
-pub trait ScheduleExecutable: Default + Send + Sync + 'static {
+pub trait ScheduleExecutable: Default {
     /// Applies commands from executed nodes to the given world.
     fn apply_deferred(&mut self, world: &mut World);
 

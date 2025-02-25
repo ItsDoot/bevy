@@ -15,8 +15,7 @@ use bevy_ecs::{
     prelude::*,
     result::{Error, SystemErrorContext},
     schedule::{
-        default::{DefaultGraph, ScheduledSystem, ScheduledSystemSet},
-        traits::ScheduleGraph,
+        default::{DefaultBuildSettings, DefaultGraph, ScheduledSystem, ScheduledSystemSet},
         ScheduleLabel,
     },
     system::{IntoObserverSystem, SystemId, SystemInput},
@@ -1172,12 +1171,11 @@ impl App {
     }
 
     /// Applies the provided [`ScheduleBuildSettings`] to all schedules.
-    pub fn configure_schedules<G: ScheduleGraph>(
+    pub fn configure_schedules(
         &mut self,
-        schedule_build_settings: G::BuildSettings,
+        schedule_build_settings: DefaultBuildSettings,
     ) -> &mut Self {
-        self.main_mut()
-            .configure_schedules::<G>(schedule_build_settings);
+        self.main_mut().configure_schedules(schedule_build_settings);
         self
     }
 
