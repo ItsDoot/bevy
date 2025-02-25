@@ -29,7 +29,7 @@ use crate::{
         },
         pass::ScheduleBuildPassObj,
         passes::AutoInsertApplyDeferredPass,
-        traits::{GraphNode, NodeType, ProcessedConfigs, ScheduleGraph},
+        traits::{GraphNode, ProcessedConfigs, ScheduleGraph},
         AnonymousSet, BoxedCondition, ExecutorKind, InternedScheduleLabel, InternedSystemSet,
         MultiThreadedExecutor, NodeConfig, NodeConfigs, ReportCycles, ScheduleBuildPass,
         ScheduleExecutor, SimpleExecutor, SingleThreadedExecutor, SystemSet,
@@ -185,7 +185,7 @@ impl DefaultGraph {
 
     fn apply_collective_conditions<N>(
         &mut self,
-        configs: &mut [NodeConfigs<N>],
+        configs: &mut [NodeConfigs<N, Self>],
         collective_conditions: Vec<BoxedCondition>,
     ) where
         N: GraphNode<Self, Metadata = DefaultMetadata, GroupMetadata = DefaultGroupMetadata>,
@@ -218,7 +218,7 @@ impl DefaultGraph {
     #[track_caller]
     pub(crate) fn process_configs<N>(
         &mut self,
-        configs: NodeConfigs<N>,
+        configs: NodeConfigs<N, Self>,
         collect_nodes: bool,
     ) -> Result<ProcessedConfigs<N, Self>, DefaultBuildError>
     where
@@ -318,7 +318,7 @@ impl DefaultGraph {
     /// Add a [`SystemConfig`] to the graph, including its dependencies and conditions.
     pub(crate) fn add_system_inner(
         &mut self,
-        config: NodeConfig<ScheduledSystem>,
+        config: NodeConfig<ScheduledSystem, Self>,
     ) -> Result<NodeId, DefaultBuildError> {
         let id = NodeId::System(self.systems.len());
 
@@ -336,7 +336,7 @@ impl DefaultGraph {
     /// Add a single `SystemSetConfig` to the graph, including its dependencies and conditions.
     pub(crate) fn configure_set_inner(
         &mut self,
-        mut config: NodeConfig<ScheduledSystemSet>,
+        mut config: NodeConfig<ScheduledSystemSet, Self>,
     ) -> Result<NodeId, DefaultBuildError> {
         let id = match self.system_set_ids.get(&config.node) {
             Some(&id) => id,

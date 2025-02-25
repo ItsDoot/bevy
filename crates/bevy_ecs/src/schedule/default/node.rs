@@ -10,10 +10,7 @@ use crate::{
             GraphInfo,
         },
         graph::Direction,
-        traits::{
-            DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, NodeType,
-            ProcessedConfigs,
-        },
+        traits::{DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, ProcessedConfigs},
         InternedSystemSet, IntoNodeConfigs, NodeConfig, NodeConfigs,
     },
     system::{BoxedSystem, InfallibleSystemWrapper, IntoSystem},
@@ -23,13 +20,14 @@ use crate::{
 pub type ScheduledSystem = BoxedSystem<(), Result>;
 
 /// Shorthand for [`NodeConfigs`] containing [`ScheduledSystem`]s.
-pub type SystemConfigs = NodeConfigs<ScheduledSystem>;
+pub type SystemConfigs<G = DefaultGraph> = NodeConfigs<ScheduledSystem, G>;
 
-impl NodeType for ScheduledSystem {
+impl GraphNode<DefaultGraph> for ScheduledSystem {
     type Metadata = DefaultMetadata;
     type GroupMetadata = DefaultGroupMetadata;
+    type ProcessData = DenselyChained;
 
-    fn into_config(self) -> NodeConfig<Self> {
+    fn into_config(self) -> NodeConfig<Self, DefaultGraph> {
         // include system in its default sets
         let sets = self.default_system_sets();
         NodeConfig {
@@ -43,21 +41,17 @@ impl NodeType for ScheduledSystem {
             },
         }
     }
-}
-
-impl GraphNode<DefaultGraph> for ScheduledSystem {
-    type ProcessData = DenselyChained;
 
     fn process_config(
         graph: &mut DefaultGraph,
-        config: NodeConfig<Self>,
+        config: NodeConfig<Self, DefaultGraph>,
     ) -> Result<NodeId, DefaultBuildError> {
         graph.add_system_inner(config)
     }
 
     fn process_configs(
         graph: &mut DefaultGraph,
-        configs: NodeConfigs<Self>,
+        configs: NodeConfigs<Self, DefaultGraph>,
         collect_nodes: bool,
     ) -> Result<ProcessedConfigs<Self, DefaultGraph>, DefaultBuildError> {
         graph.process_configs(configs, collect_nodes)
@@ -68,14 +62,14 @@ impl GraphNode<DefaultGraph> for ScheduledSystem {
 #[doc(hidden)]
 pub struct Infallible;
 
-impl<F, Marker> IntoNodeConfigs<ScheduledSystem, (Infallible, Marker)> for F
+impl<F, Marker> IntoNodeConfigs<ScheduledSystem, DefaultGraph, (Infallible, Marker)> for F
 where
     F: IntoSystem<(), (), Marker>,
 {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem> {
-        let wrapper = InfallibleSystemWrapper::new(IntoSystem::into_system(self));
-        let config = <ScheduledSystem as NodeType>::into_config(Box::new(wrapper));
-        NodeConfigs::Single(config)
+    fn into_configs(self) -> NodeConfigs<ScheduledSystem, DefaultGraph> {
+        let system = Box::new(InfallibleSystemWrapper::new(IntoSystem::into_system(self)))
+            as ScheduledSystem;
+        NodeConfigs::Single(system.into_config())
     }
 }
 
@@ -83,19 +77,18 @@ where
 #[doc(hidden)]
 pub struct Fallible;
 
-impl<F, Marker> IntoNodeConfigs<ScheduledSystem, (Fallible, Marker)> for F
+impl<F, Marker> IntoNodeConfigs<ScheduledSystem, DefaultGraph, (Fallible, Marker)> for F
 where
     F: IntoSystem<(), Result, Marker>,
 {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem> {
-        let config =
-            <ScheduledSystem as NodeType>::into_config(Box::new(IntoSystem::into_system(self)));
-        NodeConfigs::Single(config)
+    fn into_configs(self) -> NodeConfigs<ScheduledSystem, DefaultGraph> {
+        let system = Box::new(IntoSystem::into_system(self)) as ScheduledSystem;
+        NodeConfigs::Single(system.into_config())
     }
 }
 
-impl IntoNodeConfigs<ScheduledSystem, ()> for BoxedSystem<(), Result> {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem> {
+impl IntoNodeConfigs<ScheduledSystem, DefaultGraph, ()> for BoxedSystem<(), Result> {
+    fn into_configs(self) -> NodeConfigs<ScheduledSystem, DefaultGraph> {
         NodeConfigs::Single(self.into_config())
     }
 }
@@ -104,13 +97,14 @@ impl IntoNodeConfigs<ScheduledSystem, ()> for BoxedSystem<(), Result> {
 pub type ScheduledSystemSet = InternedSystemSet;
 
 /// Shorthand for [`NodeConfigs`] containing [`ScheduledSystemSet`]s.
-pub type SystemSetConfigs = NodeConfigs<ScheduledSystemSet>;
+pub type SystemSetConfigs<G = DefaultGraph> = NodeConfigs<ScheduledSystemSet, G>;
 
-impl NodeType for ScheduledSystemSet {
+impl GraphNode<DefaultGraph> for ScheduledSystemSet {
     type Metadata = DefaultMetadata;
     type GroupMetadata = DefaultGroupMetadata;
+    type ProcessData = DenselyChained;
 
-    fn into_config(self) -> NodeConfig<Self> {
+    fn into_config(self) -> NodeConfig<Self, DefaultGraph> {
         // system type sets are automatically populated
         // to avoid unintentionally broad changes, they cannot be configured
         assert!(
@@ -123,29 +117,25 @@ impl NodeType for ScheduledSystemSet {
             metadata: DefaultMetadata::default(),
         }
     }
-}
-
-impl GraphNode<DefaultGraph> for ScheduledSystemSet {
-    type ProcessData = DenselyChained;
 
     fn process_config(
         graph: &mut DefaultGraph,
-        config: NodeConfig<Self>,
+        config: NodeConfig<Self, DefaultGraph>,
     ) -> Result<NodeId, DefaultBuildError> {
         graph.configure_set_inner(config)
     }
 
     fn process_configs(
         graph: &mut DefaultGraph,
-        configs: NodeConfigs<Self>,
+        configs: NodeConfigs<Self, DefaultGraph>,
         collect_nodes: bool,
     ) -> Result<ProcessedConfigs<Self, DefaultGraph>, DefaultBuildError> {
         graph.process_configs(configs, collect_nodes)
     }
 }
 
-impl<S: SystemSet> IntoNodeConfigs<ScheduledSystemSet, ()> for S {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystemSet> {
+impl<S: SystemSet> IntoNodeConfigs<ScheduledSystemSet, DefaultGraph, ()> for S {
+    fn into_configs(self) -> NodeConfigs<ScheduledSystemSet, DefaultGraph> {
         NodeConfigs::Single(self.intern().into_config())
     }
 }

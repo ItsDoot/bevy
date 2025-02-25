@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
 use variadics_please::all_tuples;
 
-use crate::schedule::traits::NodeType;
+use crate::schedule::traits::{GraphNode, ScheduleGraph};
 
 /// Stores configuration for a single generic node (a system or a system set)
 ///
@@ -9,7 +9,7 @@ use crate::schedule::traits::NodeType;
 /// (hierarchy: in which sets is the node contained,
 /// dependencies: before/after which other nodes should this node run)
 /// and the run conditions associated with this node.
-pub struct NodeConfig<N: NodeType> {
+pub struct NodeConfig<N: GraphNode<G>, G: ScheduleGraph> {
     /// The node itself.
     pub node: N,
     /// Additional data used to configure the node.
@@ -17,13 +17,13 @@ pub struct NodeConfig<N: NodeType> {
 }
 
 /// A collections of generic [`NodeConfig`]s.
-pub enum NodeConfigs<N: NodeType> {
+pub enum NodeConfigs<N: GraphNode<G>, G: ScheduleGraph> {
     /// Configuration for a single node.
-    Single(NodeConfig<N>),
+    Single(NodeConfig<N, G>),
     /// Configuration for a nested group of nodes.
     Group {
         /// Configuration for each element of the group.
-        configs: Vec<NodeConfigs<N>>,
+        configs: Vec<NodeConfigs<N, G>>,
         /// Metadata applied to all elements in the group.
         metadata: N::GroupMetadata,
     },
@@ -73,21 +73,21 @@ pub enum NodeConfigs<N: NodeType> {
     message = "`{Self}` does not describe a valid system configuration",
     label = "invalid system configuration"
 )]
-pub trait IntoNodeConfigs<N: NodeType, Marker>: Sized {
+pub trait IntoNodeConfigs<N: GraphNode<G>, G: ScheduleGraph, Marker>: Sized {
     /// Converts this value into a [`NodeConfigs`].
-    fn into_configs(self) -> NodeConfigs<N>;
+    fn into_configs(self) -> NodeConfigs<N, G>;
 }
 
 /// Singular [`NodeConfig`]s can be converted into [`NodeConfigs`].
-impl<N: NodeType> IntoNodeConfigs<N, ()> for NodeConfig<N> {
-    fn into_configs(self) -> NodeConfigs<N> {
+impl<N: GraphNode<G>, G: ScheduleGraph> IntoNodeConfigs<N, G, ()> for NodeConfig<N, G> {
+    fn into_configs(self) -> NodeConfigs<N, G> {
         NodeConfigs::Single(self)
     }
 }
 
 /// [`NodeConfigs`] can be converted into themselves.
-impl<N: NodeType> IntoNodeConfigs<N, ()> for NodeConfigs<N> {
-    fn into_configs(self) -> NodeConfigs<N> {
+impl<N: GraphNode<G>, G: ScheduleGraph> IntoNodeConfigs<N, G, ()> for NodeConfigs<N, G> {
+    fn into_configs(self) -> NodeConfigs<N, G> {
         self
     }
 }
@@ -98,9 +98,9 @@ pub struct NodeConfigTupleMarker;
 macro_rules! impl_node_type_collection {
     ($(#[$meta:meta])* $(($param: ident, $sys: ident)),*) => {
         $(#[$meta])*
-        impl<$($param, $sys),*, N: NodeType> IntoNodeConfigs<N, (NodeConfigTupleMarker, $($param,)*)> for ($($sys,)*)
+        impl<$($param, $sys),*, N: GraphNode<G>, G: ScheduleGraph> IntoNodeConfigs<N, G, (NodeConfigTupleMarker, $($param,)*)> for ($($sys,)*)
         where
-            $($sys: IntoNodeConfigs<N, $param>),*
+            $($sys: IntoNodeConfigs<N, G, $param>),*
         {
             #[expect(
                 clippy::allow_attributes,
@@ -110,7 +110,7 @@ macro_rules! impl_node_type_collection {
                 non_snake_case,
                 reason = "Variable names are provided by the macro caller, not by us."
             )]
-            fn into_configs(self) -> NodeConfigs<N> {
+            fn into_configs(self) -> NodeConfigs<N, G> {
                 let ($($sys,)*) = self;
                 NodeConfigs::Group {
                     configs: vec![$($sys.into_configs(),)*],
