@@ -5,11 +5,9 @@ use crate::{
     component::{ComponentId, Tick},
     query::Access,
     result::Result,
-    system::{input::SystemIn, System, SystemInput},
+    system::{input::SystemIn, IntoSystem, System, SystemInput},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
-
-use super::IntoSystem;
 
 /// A wrapper system to change a system that returns `()` to return `Ok(())` to make it into a [`ScheduleSystem`]
 pub struct InfallibleSystemWrapper<S, In = (), Out = ()>(S)
