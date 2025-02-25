@@ -5,25 +5,37 @@ use crate::{
     component::{ComponentId, Tick},
     query::Access,
     result::Result,
-    system::{input::SystemIn, BoxedSystem, System},
+    system::{input::SystemIn, BoxedSystem, System, SystemInput},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
 use super::IntoSystem;
 
 /// A wrapper system to change a system that returns `()` to return `Ok(())` to make it into a [`ScheduleSystem`]
-pub struct InfallibleSystemWrapper<S: System<In = (), Out = ()>>(S);
+pub struct InfallibleSystemWrapper<S, In = (), Out = ()>(S)
+where
+    S: System<In = In, Out = Out>,
+    In: SystemInput;
 
-impl<S: System<In = (), Out = ()>> InfallibleSystemWrapper<S> {
+impl<S, In, Out> InfallibleSystemWrapper<S, In, Out>
+where
+    S: System<In = In, Out = Out>,
+    In: SystemInput,
+{
     /// Create a new `OkWrapperSystem`
     pub fn new(system: S) -> Self {
         Self(IntoSystem::into_system(system))
     }
 }
 
-impl<S: System<In = (), Out = ()>> System for InfallibleSystemWrapper<S> {
-    type In = ();
-    type Out = Result;
+impl<S, In, Out> System for InfallibleSystemWrapper<S, In, Out>
+where
+    S: System<In = In, Out = Out>,
+    In: SystemInput + 'static,
+    Out: 'static,
+{
+    type In = In;
+    type Out = Result<Out>;
 
     #[inline]
     fn name(&self) -> Cow<'static, str> {
@@ -61,14 +73,12 @@ impl<S: System<In = (), Out = ()>> System for InfallibleSystemWrapper<S> {
         input: SystemIn<'_, Self>,
         world: UnsafeWorldCell,
     ) -> Self::Out {
-        self.0.run_unsafe(input, world);
-        Ok(())
+        Ok(self.0.run_unsafe(input, world))
     }
 
     #[inline]
     fn run(&mut self, input: SystemIn<'_, Self>, world: &mut World) -> Self::Out {
-        self.0.run(input, world);
-        Ok(())
+        Ok(self.0.run(input, world))
     }
 
     #[inline]

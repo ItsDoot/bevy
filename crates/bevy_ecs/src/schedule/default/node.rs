@@ -10,17 +10,21 @@ use crate::{
             GraphInfo,
         },
         graph::Direction,
-        traits::{DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, ProcessedConfigs},
+        traits::{
+            DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, ProcessedConfigs,
+            ScheduleGraph,
+        },
         InternedSystemSet, IntoNodeConfigs, NodeConfig, NodeConfigs,
     },
-    system::{BoxedSystem, InfallibleSystemWrapper, IntoSystem},
+    system::{BoxedSystem, InfallibleSystemWrapper, IntoSystem, SystemInput},
 };
 
 /// [`DefaultGraph`] [`GraphNode`] for inserting systems into the schedule.
-pub type ScheduledSystem = BoxedSystem<(), Result>;
+pub type ScheduledSystem<In = (), Out = ()> = BoxedSystem<In, Result<Out>>;
 
 /// Shorthand for [`NodeConfigs`] containing [`ScheduledSystem`]s.
-pub type SystemConfigs<G = DefaultGraph> = NodeConfigs<ScheduledSystem, G>;
+pub type SystemConfigs<In = (), Out = (), G = DefaultGraph> =
+    NodeConfigs<ScheduledSystem<In, Out>, G>;
 
 impl GraphNode<DefaultGraph> for ScheduledSystem {
     type Metadata = DefaultMetadata;
@@ -62,13 +66,17 @@ impl GraphNode<DefaultGraph> for ScheduledSystem {
 #[doc(hidden)]
 pub struct Infallible;
 
-impl<F, Marker> IntoNodeConfigs<ScheduledSystem, DefaultGraph, (Infallible, Marker)> for F
+impl<In, Out, G, F, Marker> IntoNodeConfigs<ScheduledSystem<In, Out>, G, (Infallible, Marker)> for F
 where
-    F: IntoSystem<(), (), Marker>,
+    In: SystemInput + 'static,
+    Out: 'static,
+    ScheduledSystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Out, Marker>,
 {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem, DefaultGraph> {
+    fn into_configs(self) -> NodeConfigs<ScheduledSystem<In, Out>, G> {
         let system = Box::new(InfallibleSystemWrapper::new(IntoSystem::into_system(self)))
-            as ScheduledSystem;
+            as ScheduledSystem<In, Out>;
         NodeConfigs::Single(system.into_config())
     }
 }
@@ -77,12 +85,16 @@ where
 #[doc(hidden)]
 pub struct Fallible;
 
-impl<F, Marker> IntoNodeConfigs<ScheduledSystem, DefaultGraph, (Fallible, Marker)> for F
+impl<In, Out, G, F, Marker> IntoNodeConfigs<ScheduledSystem<In, Out>, G, (Fallible, Marker)> for F
 where
-    F: IntoSystem<(), Result, Marker>,
+    In: SystemInput + 'static,
+    Out: 'static,
+    ScheduledSystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Result<Out>, Marker>,
 {
-    fn into_configs(self) -> NodeConfigs<ScheduledSystem, DefaultGraph> {
-        let system = Box::new(IntoSystem::into_system(self)) as ScheduledSystem;
+    fn into_configs(self) -> NodeConfigs<ScheduledSystem<In, Out>, G> {
+        let system = Box::new(IntoSystem::into_system(self)) as ScheduledSystem<In, Out>;
         NodeConfigs::Single(system.into_config())
     }
 }
