@@ -19,10 +19,9 @@ use crate::{
     query::Access,
     result::{Error, Result, SystemErrorContext},
     schedule::{
-        default::{DefaultGraph, DefaultGraphExecutable},
+        default::{DefaultGraph, DefaultGraphExecutable, ScheduledSystem},
         is_apply_deferred, BoxedCondition, ExecutorKind, ScheduleExecutor,
     },
-    system::ScheduleSystem,
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
@@ -31,7 +30,7 @@ use super::__rust_begin_short_backtrace;
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
     executor: &'env MultiThreadedExecutor,
-    systems: &'sys [SyncUnsafeCell<ScheduleSystem>],
+    systems: &'sys [SyncUnsafeCell<ScheduledSystem>],
     conditions: SyncUnsafeCell<Conditions<'sys>>,
     world_cell: UnsafeWorldCell<'env>,
 }
@@ -278,7 +277,7 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
         &self,
         system_index: usize,
         res: Result<(), Box<dyn Any + Send>>,
-        system: &ScheduleSystem,
+        system: &ScheduledSystem,
     ) {
         // tell the executor that the system finished
         self.environment
@@ -468,7 +467,7 @@ impl ExecutorState {
     fn can_run(
         &mut self,
         system_index: usize,
-        system: &mut ScheduleSystem,
+        system: &mut ScheduledSystem,
         conditions: &mut Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
@@ -532,7 +531,7 @@ impl ExecutorState {
     unsafe fn should_run(
         &mut self,
         system_index: usize,
-        system: &mut ScheduleSystem,
+        system: &mut ScheduledSystem,
         conditions: &mut Conditions,
         world: UnsafeWorldCell,
     ) -> bool {
@@ -735,7 +734,7 @@ impl ExecutorState {
 
 fn apply_deferred(
     unapplied_systems: &FixedBitSet,
-    systems: &[SyncUnsafeCell<ScheduleSystem>],
+    systems: &[SyncUnsafeCell<ScheduledSystem>],
     world: &mut World,
 ) -> Result<(), Box<dyn Any + Send>> {
     for system_index in unapplied_systems.ones() {

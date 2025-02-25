@@ -5,7 +5,7 @@ use crate::{
     component::{ComponentId, Tick},
     query::Access,
     result::Result,
-    system::{input::SystemIn, BoxedSystem, System, SystemInput},
+    system::{input::SystemIn, System, SystemInput},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
@@ -125,6 +125,3 @@ where
         self.0.default_system_sets()
     }
 }
-
-/// Type alias for a `BoxedSystem` that a `Schedule` can store.
-pub type ScheduleSystem = BoxedSystem<(), Result>;

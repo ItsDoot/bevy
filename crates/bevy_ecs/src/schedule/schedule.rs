@@ -23,7 +23,6 @@ use crate::{
         traits::{EcsScheduleGraph, GraphNode, ScheduleExecutable, ScheduleGraph},
         *,
     },
-    system::ScheduleSystem,
     world::World,
 };
 
@@ -548,7 +547,7 @@ impl Schedule {
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (NodeId, &ScheduleSystem)> + Sized, ScheduleNotInitialized>
+    ) -> Result<impl Iterator<Item = (NodeId, &ScheduledSystem)> + Sized, ScheduleNotInitialized>
     {
         if !self.executor_initialized {
             return Err(ScheduleNotInitialized);

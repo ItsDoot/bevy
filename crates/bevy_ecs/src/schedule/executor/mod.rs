@@ -19,8 +19,8 @@ use crate::{
     prelude::{IntoSystemSet, SystemSet},
     query::Access,
     result::{Error, Result, SystemErrorContext},
-    schedule::{traits::ScheduleGraph, InternedSystemSet, SystemTypeSet},
-    system::{ScheduleSystem, System, SystemIn},
+    schedule::{default::ScheduledSystem, traits::ScheduleGraph, InternedSystemSet, SystemTypeSet},
+    system::{System, SystemIn},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
@@ -109,7 +109,7 @@ pub const apply_deferred: ApplyDeferred = ApplyDeferred;
 pub struct ApplyDeferred;
 
 /// Returns `true` if the [`System`] is an instance of [`ApplyDeferred`].
-pub(super) fn is_apply_deferred(system: &ScheduleSystem) -> bool {
+pub(super) fn is_apply_deferred(system: &ScheduledSystem) -> bool {
     system.type_id() == TypeId::of::<ApplyDeferred>()
 }
 
@@ -218,14 +218,18 @@ mod __rust_begin_short_backtrace {
 
     use crate::{
         result::Result,
-        system::{ReadOnlySystem, ScheduleSystem},
+        schedule::default::ScheduledSystem,
+        system::ReadOnlySystem,
         world::{unsafe_world_cell::UnsafeWorldCell, World},
     };
 
     /// # Safety
     /// See `System::run_unsafe`.
     #[inline(never)]
-    pub(super) unsafe fn run_unsafe(system: &mut ScheduleSystem, world: UnsafeWorldCell) -> Result {
+    pub(super) unsafe fn run_unsafe(
+        system: &mut ScheduledSystem,
+        world: UnsafeWorldCell,
+    ) -> Result {
         let result = system.run_unsafe((), world);
         black_box(());
         result
@@ -246,7 +250,7 @@ mod __rust_begin_short_backtrace {
     }
 
     #[inline(never)]
-    pub(super) fn run(system: &mut ScheduleSystem, world: &mut World) -> Result {
+    pub(super) fn run(system: &mut ScheduledSystem, world: &mut World) -> Result {
         let result = system.run((), world);
         black_box(());
         result
