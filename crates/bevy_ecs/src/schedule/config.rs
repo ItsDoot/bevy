@@ -10,8 +10,10 @@ use crate::schedule::traits::NodeType;
 /// dependencies: before/after which other nodes should this node run)
 /// and the run conditions associated with this node.
 pub struct NodeConfig<N: NodeType> {
-    pub(crate) node: N,
-    pub(crate) metadata: N::Metadata,
+    /// The node itself.
+    pub node: N,
+    /// Additional data used to configure the node.
+    pub metadata: N::Metadata,
 }
 
 /// A collections of generic [`NodeConfig`]s.
