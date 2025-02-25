@@ -177,15 +177,14 @@ where
     }
 }
 
-impl<In, Out, G> IntoNodeConfigs<BoxedSystem<In, Result<Out>>, G, ()>
-    for BoxedSystem<In, Result<Out>>
+impl<In, Out, G> IntoNodeConfigs<Self, G, ()> for BoxedSystem<In, Out>
 where
     In: SystemInput + 'static,
     Out: 'static,
-    BoxedSystem<In, Result<Out>>: GraphNode<G>,
+    Self: GraphNode<G>,
     G: ScheduleGraph,
 {
-    fn into_configs(self) -> NodeConfigs<BoxedSystem<In, Result<Out>>, G> {
+    fn into_configs(self) -> NodeConfigs<Self, G> {
         NodeConfigs::Single(self.into_config())
     }
 }
