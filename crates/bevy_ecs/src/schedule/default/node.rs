@@ -10,7 +10,7 @@ use crate::{
         },
         graph::Direction,
         traits::{DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, ProcessedConfigs},
-        InternedSystemSet, NodeConfig, NodeConfigs,
+        FallibleSystem, InternedSystemSet, NodeConfig, NodeConfigs,
     },
     system::BoxedSystem,
 };
@@ -20,16 +20,16 @@ pub type ScheduledSystem<In = (), Out = ()> = BoxedSystem<In, Result<Out>>;
 
 /// Shorthand for [`NodeConfigs`] containing [`ScheduledSystem`]s.
 pub type SystemConfigs<In = (), Out = (), G = DefaultGraph> =
-    NodeConfigs<ScheduledSystem<In, Out>, G>;
+    NodeConfigs<FallibleSystem<In, Out>, G>;
 
-impl GraphNode<DefaultGraph> for ScheduledSystem {
+impl GraphNode<DefaultGraph> for FallibleSystem {
     type Metadata = DefaultMetadata;
     type GroupMetadata = DefaultGroupMetadata;
     type ProcessData = DenselyChained;
 
     fn into_config(self) -> NodeConfig<Self, DefaultGraph> {
         // include system in its default sets
-        let sets = self.default_system_sets();
+        let sets = self.0.default_system_sets();
         NodeConfig {
             node: self,
             metadata: DefaultMetadata {
@@ -58,13 +58,10 @@ impl GraphNode<DefaultGraph> for ScheduledSystem {
     }
 }
 
-/// [`DefaultGraph`] [`GraphNode`] for inserting system sets into the schedule.
-pub type ScheduledSystemSet = InternedSystemSet;
+/// Shorthand for [`NodeConfigs`] containing [`InternedSystemSet`]s.
+pub type SystemSetConfigs<G = DefaultGraph> = NodeConfigs<InternedSystemSet, G>;
 
-/// Shorthand for [`NodeConfigs`] containing [`ScheduledSystemSet`]s.
-pub type SystemSetConfigs<G = DefaultGraph> = NodeConfigs<ScheduledSystemSet, G>;
-
-impl GraphNode<DefaultGraph> for ScheduledSystemSet {
+impl GraphNode<DefaultGraph> for InternedSystemSet {
     type Metadata = DefaultMetadata;
     type GroupMetadata = DefaultGroupMetadata;
     type ProcessData = DenselyChained;

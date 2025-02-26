@@ -17,9 +17,7 @@ use crate::{
     resource::Resource,
     result::{DefaultSystemErrorHandler, Error, SystemErrorContext},
     schedule::{
-        default::{
-            DefaultGraph, IgnoredSchedulingAmbiguities, NodeId, ScheduledSystem, ScheduledSystemSet,
-        },
+        default::{DefaultGraph, IgnoredSchedulingAmbiguities, NodeId, ScheduledSystem},
         traits::{EcsScheduleGraph, GraphNode, ScheduleExecutable, ScheduleGraph},
         *,
     },
@@ -141,10 +139,10 @@ impl<G: ScheduleGraph> Schedules<G> {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoNodeConfigs<ScheduledSystem, G, M>,
+        systems: impl IntoNodeConfigs<FallibleSystem, G, M>,
     ) -> &mut Self
     where
-        ScheduledSystem: GraphNode<G>,
+        FallibleSystem: GraphNode<G>,
     {
         self.process_nodes(schedule, systems)
     }
@@ -154,10 +152,10 @@ impl<G: ScheduleGraph> Schedules<G> {
     pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoNodeConfigs<ScheduledSystemSet, G, M>,
+        sets: impl IntoNodeConfigs<InternedSystemSet, G, M>,
     ) -> &mut Self
     where
-        ScheduledSystemSet: GraphNode<G>,
+        InternedSystemSet: GraphNode<G>,
     {
         self.process_nodes(schedule, sets)
     }
@@ -312,10 +310,10 @@ impl<G: ScheduleGraph> Schedule<G> {
     /// Add a collection of systems to the schedule.
     pub fn add_systems<M>(
         &mut self,
-        systems: impl IntoNodeConfigs<ScheduledSystem, G, M>,
+        systems: impl IntoNodeConfigs<FallibleSystem, G, M>,
     ) -> &mut Self
     where
-        ScheduledSystem: GraphNode<G>,
+        FallibleSystem: GraphNode<G>,
     {
         self.process_nodes(systems)
     }
@@ -324,10 +322,10 @@ impl<G: ScheduleGraph> Schedule<G> {
     #[track_caller]
     pub fn configure_sets<M>(
         &mut self,
-        sets: impl IntoNodeConfigs<ScheduledSystemSet, G, M>,
+        sets: impl IntoNodeConfigs<InternedSystemSet, G, M>,
     ) -> &mut Self
     where
-        ScheduledSystemSet: GraphNode<G>,
+        InternedSystemSet: GraphNode<G>,
     {
         self.process_nodes(sets)
     }

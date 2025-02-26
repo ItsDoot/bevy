@@ -138,23 +138,63 @@ all_tuples!(
     S
 );
 
-/// Marker component to allow for conflicting implementations of [`IntoNodeConfigs`]
-#[doc(hidden)]
-pub struct Infallible;
+/// [`System`]s that cannot fail can be converted into [`NodeConfigs`] for a
+/// given supported [`ScheduleGraph`].
+///
+/// [`System`]: crate::system::System
+pub struct InfallibleSystem<In: SystemInput = (), Out = ()>(pub BoxedSystem<In, Out>);
 
-impl<In, Out, G, F, Marker> IntoNodeConfigs<BoxedSystem<In, Result<Out>>, G, (Infallible, Marker)>
+impl<In, Out, G, F, Marker> IntoNodeConfigs<InfallibleSystem<In, Out>, G, (Infallible, Marker)>
     for F
 where
     In: SystemInput + 'static,
     Out: 'static,
-    BoxedSystem<In, Result<Out>>: GraphNode<G>,
+    InfallibleSystem<In, Out>: GraphNode<G>,
     G: ScheduleGraph,
     F: IntoSystem<In, Out, Marker>,
 {
-    fn into_configs(self) -> NodeConfigs<BoxedSystem<In, Result<Out>>, G> {
-        let system = Box::new(InfallibleSystemWrapper::new(IntoSystem::into_system(self)))
-            as BoxedSystem<In, Result<Out>>;
-        NodeConfigs::Single(system.into_config())
+    fn into_configs(self) -> NodeConfigs<InfallibleSystem<In, Out>, G> {
+        let system = Box::new(IntoSystem::into_system(self));
+        NodeConfigs::Single(InfallibleSystem(system).into_config())
+    }
+}
+
+impl<In, Out, G> IntoNodeConfigs<InfallibleSystem<In, Out>, G, ()> for BoxedSystem<In, Out>
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    InfallibleSystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+{
+    fn into_configs(self) -> NodeConfigs<InfallibleSystem<In, Out>, G> {
+        NodeConfigs::Single(InfallibleSystem(self).into_config())
+    }
+}
+
+/// [`System`]s that can return a result can be converted into [`NodeConfigs`]
+/// for a given supported [`ScheduleGraph`].
+///
+/// [`InfallibleSystemWrapper`] is used to support systems that do not return a
+/// result.
+///
+/// [`System`]: crate::system::System
+pub struct FallibleSystem<In: SystemInput = (), Out = ()>(pub BoxedSystem<In, Result<Out>>);
+
+/// Marker component to allow for conflicting implementations of [`IntoNodeConfigs`]
+#[doc(hidden)]
+pub struct Infallible;
+
+impl<In, Out, G, F, Marker> IntoNodeConfigs<FallibleSystem<In, Out>, G, (Infallible, Marker)> for F
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    FallibleSystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Out, Marker>,
+{
+    fn into_configs(self) -> NodeConfigs<FallibleSystem<In, Out>, G> {
+        let system = Box::new(InfallibleSystemWrapper::new(IntoSystem::into_system(self)));
+        NodeConfigs::Single(FallibleSystem(system).into_config())
     }
 }
 
@@ -162,30 +202,29 @@ where
 #[doc(hidden)]
 pub struct Fallible;
 
-impl<In, Out, G, F, Marker> IntoNodeConfigs<BoxedSystem<In, Result<Out>>, G, (Fallible, Marker)>
-    for F
+impl<In, Out, G, F, Marker> IntoNodeConfigs<FallibleSystem<In, Out>, G, (Fallible, Marker)> for F
 where
     In: SystemInput + 'static,
     Out: 'static,
-    BoxedSystem<In, Result<Out>>: GraphNode<G>,
+    FallibleSystem<In, Out>: GraphNode<G>,
     G: ScheduleGraph,
     F: IntoSystem<In, Result<Out>, Marker>,
 {
-    fn into_configs(self) -> NodeConfigs<BoxedSystem<In, Result<Out>>, G> {
-        let system = Box::new(IntoSystem::into_system(self)) as BoxedSystem<In, Result<Out>>;
-        NodeConfigs::Single(system.into_config())
+    fn into_configs(self) -> NodeConfigs<FallibleSystem<In, Out>, G> {
+        let system = Box::new(IntoSystem::into_system(self));
+        NodeConfigs::Single(FallibleSystem(system).into_config())
     }
 }
 
-impl<In, Out, G> IntoNodeConfigs<Self, G, ()> for BoxedSystem<In, Out>
+impl<In, Out, G> IntoNodeConfigs<FallibleSystem<In, Out>, G, ()> for BoxedSystem<In, Result<Out>>
 where
     In: SystemInput + 'static,
     Out: 'static,
-    Self: GraphNode<G>,
+    FallibleSystem<In, Out>: GraphNode<G>,
     G: ScheduleGraph,
 {
-    fn into_configs(self) -> NodeConfigs<Self, G> {
-        NodeConfigs::Single(self.into_config())
+    fn into_configs(self) -> NodeConfigs<FallibleSystem<In, Out>, G> {
+        NodeConfigs::Single(FallibleSystem(self).into_config())
     }
 }
 

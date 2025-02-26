@@ -21,7 +21,7 @@ use crate::{
     schedule::{
         default::{
             Chain, DefaultGraphExecutable, DefaultGroupMetadata, DefaultMetadata, DenselyChained,
-            GraphInfo, NodeId, ScheduledSystem, ScheduledSystemSet,
+            GraphInfo, NodeId, ScheduledSystem,
         },
         graph::{
             check_graph, index, simple_cycles_in_component, Ambiguity, CheckGraphResults, Dag,
@@ -30,9 +30,9 @@ use crate::{
         pass::ScheduleBuildPassObj,
         passes::AutoInsertApplyDeferredPass,
         traits::{GraphNode, ProcessedConfigs, ScheduleGraph},
-        AnonymousSet, BoxedCondition, ExecutorKind, InternedScheduleLabel, InternedSystemSet,
-        MultiThreadedExecutor, NodeConfig, NodeConfigs, ReportCycles, ScheduleBuildPass,
-        ScheduleExecutor, SimpleExecutor, SingleThreadedExecutor, SystemSet,
+        AnonymousSet, BoxedCondition, ExecutorKind, FallibleSystem, InternedScheduleLabel,
+        InternedSystemSet, MultiThreadedExecutor, NodeConfig, NodeConfigs, ReportCycles,
+        ScheduleBuildPass, ScheduleExecutor, SimpleExecutor, SingleThreadedExecutor, SystemSet,
     },
     storage::SparseSetIndex,
     world::World,
@@ -318,7 +318,7 @@ impl DefaultGraph {
     /// Add a [`SystemConfig`] to the graph, including its dependencies and conditions.
     pub(crate) fn add_system_inner(
         &mut self,
-        config: NodeConfig<ScheduledSystem, Self>,
+        config: NodeConfig<FallibleSystem, Self>,
     ) -> Result<NodeId, DefaultBuildError> {
         let id = NodeId::System(self.systems.len());
 
@@ -327,7 +327,7 @@ impl DefaultGraph {
 
         // system init has to be deferred (need `&mut World`)
         self.uninit.push((id, 0));
-        self.systems.push(SystemNode::new(config.node));
+        self.systems.push(SystemNode::new(config.node.0));
         self.system_conditions.push(config.metadata.conditions.0);
 
         Ok(id)
@@ -336,7 +336,7 @@ impl DefaultGraph {
     /// Add a single `SystemSetConfig` to the graph, including its dependencies and conditions.
     pub(crate) fn configure_set_inner(
         &mut self,
-        mut config: NodeConfig<ScheduledSystemSet, Self>,
+        mut config: NodeConfig<InternedSystemSet, Self>,
     ) -> Result<NodeId, DefaultBuildError> {
         let id = match self.system_set_ids.get(&config.node) {
             Some(&id) => id,
