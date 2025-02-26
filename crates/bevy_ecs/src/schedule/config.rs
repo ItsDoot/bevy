@@ -8,7 +8,10 @@ use crate::{
         traits::{GraphNode, ScheduleGraph},
         InternedSystemSet, SystemSet,
     },
-    system::{BoxedSystem, InfallibleSystemWrapper, IntoSystem, SystemInput},
+    system::{
+        BoxedReadOnlySystem, BoxedSystem, InfallibleSystemWrapper, IntoSystem, ReadOnlySystem,
+        SystemInput,
+    },
 };
 
 /// Stores configuration for a single generic node (a system or a system set)
@@ -144,6 +147,18 @@ all_tuples!(
 /// [`System`]: crate::system::System
 pub struct InfallibleSystem<In: SystemInput = (), Out = ()>(pub BoxedSystem<In, Out>);
 
+/// [`ReadOnlySystem`]s that cannot fail can be converted into [`NodeConfigs`] for a
+/// given supported [`ScheduleGraph`].
+///
+/// [`ReadOnlySystem`]: crate::system::ReadOnlySystem
+pub struct InfallibleReadOnlySystem<In: SystemInput = (), Out = ()>(
+    pub BoxedReadOnlySystem<In, Out>,
+);
+
+/// Marker component to allow for conflicting implementations of [`IntoNodeConfigs`]
+#[doc(hidden)]
+pub struct Infallible;
+
 impl<In, Out, G, F, Marker> IntoNodeConfigs<InfallibleSystem<In, Out>, G, (Infallible, Marker)>
     for F
 where
@@ -171,6 +186,34 @@ where
     }
 }
 
+impl<In, Out, G, F, Marker>
+    IntoNodeConfigs<InfallibleReadOnlySystem<In, Out>, G, (Infallible, Marker)> for F
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    InfallibleReadOnlySystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Out, Marker, System: ReadOnlySystem>,
+{
+    fn into_configs(self) -> NodeConfigs<InfallibleReadOnlySystem<In, Out>, G> {
+        let system = Box::new(IntoSystem::into_system(self));
+        NodeConfigs::Single(InfallibleReadOnlySystem(system).into_config())
+    }
+}
+
+impl<In, Out, G> IntoNodeConfigs<InfallibleReadOnlySystem<In, Out>, G, ()>
+    for BoxedReadOnlySystem<In, Out>
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    InfallibleReadOnlySystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+{
+    fn into_configs(self) -> NodeConfigs<InfallibleReadOnlySystem<In, Out>, G> {
+        NodeConfigs::Single(InfallibleReadOnlySystem(self).into_config())
+    }
+}
+
 /// [`System`]s that can return a result can be converted into [`NodeConfigs`]
 /// for a given supported [`ScheduleGraph`].
 ///
@@ -180,9 +223,20 @@ where
 /// [`System`]: crate::system::System
 pub struct FallibleSystem<In: SystemInput = (), Out = ()>(pub BoxedSystem<In, Result<Out>>);
 
+/// [`System`]s that can return a result can be converted into [`NodeConfigs`]
+/// for a given supported [`ScheduleGraph`].
+///
+/// [`InfallibleSystemWrapper`] is used to support systems that do not return a
+/// result.
+///
+/// [`System`]: crate::system::System
+pub struct FallibleReadOnlySystem<In: SystemInput = (), Out = ()>(
+    pub BoxedReadOnlySystem<In, Result<Out>>,
+);
+
 /// Marker component to allow for conflicting implementations of [`IntoNodeConfigs`]
 #[doc(hidden)]
-pub struct Infallible;
+pub struct Fallible;
 
 impl<In, Out, G, F, Marker> IntoNodeConfigs<FallibleSystem<In, Out>, G, (Infallible, Marker)> for F
 where
@@ -197,10 +251,6 @@ where
         NodeConfigs::Single(FallibleSystem(system).into_config())
     }
 }
-
-/// Marker component to allow for conflicting implementations of [`IntoNodeConfigs`]
-#[doc(hidden)]
-pub struct Fallible;
 
 impl<In, Out, G, F, Marker> IntoNodeConfigs<FallibleSystem<In, Out>, G, (Fallible, Marker)> for F
 where
@@ -225,6 +275,49 @@ where
 {
     fn into_configs(self) -> NodeConfigs<FallibleSystem<In, Out>, G> {
         NodeConfigs::Single(FallibleSystem(self).into_config())
+    }
+}
+
+impl<In, Out, G, F, Marker>
+    IntoNodeConfigs<FallibleReadOnlySystem<In, Out>, G, (Infallible, Marker)> for F
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    FallibleReadOnlySystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Out, Marker, System: ReadOnlySystem>,
+{
+    fn into_configs(self) -> NodeConfigs<FallibleReadOnlySystem<In, Out>, G> {
+        let system = Box::new(InfallibleSystemWrapper::new(IntoSystem::into_system(self)));
+        NodeConfigs::Single(FallibleReadOnlySystem(system).into_config())
+    }
+}
+
+impl<In, Out, G, F, Marker> IntoNodeConfigs<FallibleReadOnlySystem<In, Out>, G, (Fallible, Marker)>
+    for F
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    FallibleReadOnlySystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+    F: IntoSystem<In, Result<Out>, Marker, System: ReadOnlySystem>,
+{
+    fn into_configs(self) -> NodeConfigs<FallibleReadOnlySystem<In, Out>, G> {
+        let system = Box::new(IntoSystem::into_system(self));
+        NodeConfigs::Single(FallibleReadOnlySystem(system).into_config())
+    }
+}
+
+impl<In, Out, G> IntoNodeConfigs<FallibleReadOnlySystem<In, Out>, G, ()>
+    for BoxedReadOnlySystem<In, Result<Out>>
+where
+    In: SystemInput + 'static,
+    Out: 'static,
+    FallibleReadOnlySystem<In, Out>: GraphNode<G>,
+    G: ScheduleGraph,
+{
+    fn into_configs(self) -> NodeConfigs<FallibleReadOnlySystem<In, Out>, G> {
+        NodeConfigs::Single(FallibleReadOnlySystem(self).into_config())
     }
 }
 

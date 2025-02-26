@@ -5,7 +5,7 @@ use crate::{
     component::{ComponentId, Tick},
     query::Access,
     result::Result,
-    system::{input::SystemIn, IntoSystem, System, SystemInput},
+    system::{input::SystemIn, IntoSystem, ReadOnlySystem, System, SystemInput},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
@@ -121,5 +121,17 @@ where
 
     fn default_system_sets(&self) -> Vec<crate::schedule::InternedSystemSet> {
         self.0.default_system_sets()
+    }
+}
+
+// SAFETY: Only implemented for inner systems that are `ReadOnlySystem`
+unsafe impl<S, In, Out> ReadOnlySystem for InfallibleSystemWrapper<S, In, Out>
+where
+    S: ReadOnlySystem<In = In, Out = Out>,
+    In: SystemInput + 'static,
+    Out: 'static,
+{
+    fn run_readonly(&mut self, input: SystemIn<'_, Self>, world: &World) -> Self::Out {
+        Ok(self.0.run_readonly(input, world))
     }
 }
