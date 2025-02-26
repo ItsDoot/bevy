@@ -80,21 +80,21 @@ impl ScheduleBuildPass<DefaultGraph> for AutoInsertApplyDeferredPass {
         let mut sync_point_graph = dependency_flattened.clone();
         let topo = graph.topsort_graph(dependency_flattened, ReportCycles::Dependency)?;
 
-        fn set_has_conditions(graph: &ScheduleGraph, node: NodeId) -> bool {
+        fn set_has_conditions(graph: &DefaultGraph, node: NodeId) -> bool {
             !graph.set_conditions_at(node).is_empty()
                 || graph
                     .hierarchy()
-                    .graph()
+                    .graph
                     .edges_directed(node, Direction::Incoming)
                     .any(|(parent, _)| set_has_conditions(graph, parent))
         }
 
-        fn system_has_conditions(graph: &ScheduleGraph, node: NodeId) -> bool {
+        fn system_has_conditions(graph: &DefaultGraph, node: NodeId) -> bool {
             assert!(node.is_system());
             !graph.system_conditions[node.index()].is_empty()
                 || graph
                     .hierarchy()
-                    .graph()
+                    .graph
                     .edges_directed(node, Direction::Incoming)
                     .any(|(parent, _)| set_has_conditions(graph, parent))
         }
@@ -102,7 +102,7 @@ impl ScheduleBuildPass<DefaultGraph> for AutoInsertApplyDeferredPass {
         let mut system_has_conditions_cache = HashMap::default();
 
         fn is_valid_explicit_sync_point(
-            graph: &ScheduleGraph,
+            graph: &DefaultGraph,
             system: NodeId,
             system_has_conditions_cache: &mut HashMap<usize, bool>,
         ) -> bool {

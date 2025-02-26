@@ -2,7 +2,10 @@ use crate::systems::{
     compute_transform_leaves, propagate_parent_transforms, sync_simple_transforms,
 };
 use bevy_app::{App, Plugin, PostStartup, PostUpdate};
-use bevy_ecs::schedule::{default::IntoOrderedNodeConfigs, SystemSet};
+use bevy_ecs::schedule::{
+    default::{IntoChainableNodeConfigs, IntoOrderedNodeConfigs},
+    SystemSet,
+};
 
 /// Set enum for the systems relating to transform propagation
 #[derive(Debug, Hash, PartialEq, Eq, Clone, SystemSet)]
