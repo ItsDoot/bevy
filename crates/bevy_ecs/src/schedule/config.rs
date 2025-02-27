@@ -3,11 +3,9 @@ use alloc::{boxed::Box, vec, vec::Vec};
 use variadics_please::all_tuples;
 
 use crate::{
+    intern::{InternFrom, Interned},
     result::Result,
-    schedule::{
-        traits::{GraphNode, ScheduleGraph},
-        InternedSystemSet, SystemSet,
-    },
+    schedule::traits::{GraphNode, ScheduleGraph},
     system::{
         BoxedReadOnlySystem, BoxedSystem, InfallibleSystemWrapper, IntoSystem, ReadOnlySystem,
         SystemInput,
@@ -109,6 +107,7 @@ pub struct NodeConfigTupleMarker;
 macro_rules! impl_node_type_collection {
     ($(#[$meta:meta])* $(($param: ident, $sys: ident)),*) => {
         $(#[$meta])*
+        #[diagnostic::do_not_recommend]
         impl<$($param, $sys),*, N: GraphNode<G>, G: ScheduleGraph> IntoNodeConfigs<N, G, (NodeConfigTupleMarker, $($param,)*)> for ($($sys,)*)
         where
             $($sys: IntoNodeConfigs<N, G, $param>),*
@@ -321,11 +320,17 @@ where
     }
 }
 
-impl<S: SystemSet, G: ScheduleGraph> IntoNodeConfigs<InternedSystemSet, G, ()> for S
+#[doc(hidden)]
+pub struct LabelMarker;
+
+impl<Label, T, G> IntoNodeConfigs<Interned<Label>, G, LabelMarker> for T
 where
-    InternedSystemSet: GraphNode<G>,
+    Label: ?Sized + InternFrom<T>,
+    T: 'static,
+    Interned<Label>: GraphNode<G>,
+    G: ScheduleGraph,
 {
-    fn into_configs(self) -> NodeConfigs<InternedSystemSet, G> {
-        NodeConfigs::Single(self.intern().into_config())
+    fn into_configs(self) -> NodeConfigs<Interned<Label>, G> {
+        NodeConfigs::Single(Label::intern_from(self).into_config())
     }
 }

@@ -153,7 +153,11 @@ pub use system_name::*;
 pub use system_param::*;
 pub use system_registry::*;
 
-use crate::world::World;
+use crate::{
+    prelude::IntoNodeConfigs,
+    schedule::traits::{GraphNode, ScheduleGraph},
+    world::World,
+};
 
 /// Conversion trait to turn something into a [`System`].
 ///
@@ -322,6 +326,14 @@ pub fn assert_system_does_not_conflict<Out, Params, S: IntoSystem<(), Out, Param
     system.run((), &mut world);
 }
 
+/// Ensures that the provided [`GraphNode`] can be converted into a
+/// [`NodeConfigs`](crate::schedule::NodeConfigs) for the given [`ScheduleGraph`].
+pub fn assert_is_node_config<N: GraphNode<G>, G: ScheduleGraph, M>(
+    node: impl IntoNodeConfigs<N, G, M>,
+) {
+    let _ = node.into_configs();
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{vec, vec::Vec};
@@ -346,8 +358,8 @@ mod tests {
             ApplyDeferred, Condition, FallibleSystem, IntoNodeConfigs, Schedule,
         },
         system::{
-            Commands, In, IntoSystem, Local, NonSend, NonSendMut, ParamSet, Query, Res, ResMut,
-            Single, StaticSystemParam, System, SystemState,
+            assert_is_node_config, Commands, In, IntoSystem, Local, NonSend, NonSendMut, ParamSet,
+            Query, Res, ResMut, Single, StaticSystemParam, System, SystemState,
         },
         world::{DeferredWorld, EntityMut, FromWorld, World},
     };
@@ -1705,8 +1717,9 @@ mod tests {
         );
         assert_is_system(exclusive_with_state);
         assert_is_system(returning::<bool>.pipe(exclusive_in_out::<bool, ()>));
-
-        returning::<()>.run_if(returning::<bool>.pipe(not));
+        assert_is_node_config::<FallibleSystem, DefaultGraph, _>(
+            returning::<()>.run_if(returning::<bool>.pipe(not)),
+        );
     }
 
     #[test]

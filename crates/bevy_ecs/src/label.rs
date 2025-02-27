@@ -204,6 +204,12 @@ macro_rules! define_label {
             }
         }
 
+        impl<T: $label_trait_name> $crate::intern::InternFrom<T> for dyn $label_trait_name {
+            fn intern_from(value: T) -> $crate::intern::Interned<dyn $label_trait_name> {
+                value.intern()
+            }
+        }
+
         static $interner_name: $crate::intern::Interner<dyn $label_trait_name> =
             $crate::intern::Interner::new();
     };

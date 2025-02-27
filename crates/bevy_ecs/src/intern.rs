@@ -167,6 +167,16 @@ impl<T: ?Sized> Default for Interner<T> {
     }
 }
 
+/// Trait for types that can be interned from another type.
+///
+/// This trait is primarily used to generically intern labels of any type.
+pub trait InternFrom<T: 'static>: 'static {
+    /// Interns a value of type `T` into a value of type `Self`.
+    // This function is not named `intern` so it doesn't clash with the `intern`
+    // function on label types.
+    fn intern_from(value: T) -> Interned<Self>;
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{boxed::Box, string::ToString};
