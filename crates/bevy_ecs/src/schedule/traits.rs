@@ -1,7 +1,9 @@
 //! Traits used to define custom schedule graphs.
 
 use alloc::{boxed::Box, vec::Vec};
+use bevy_platform_support::{collections::HashSet, hash::FixedHasher};
 use core::{error::Error, fmt::Debug, hash::Hash};
+use fixedbitset::FixedBitSet;
 
 use crate::{
     component::Tick,
@@ -141,6 +143,8 @@ pub trait GraphNodeId: Copy + Eq + Ord + Hash + Debug + 'static {
     type Pair: GraphNodeIdPair<Self>;
     /// The type of directed identifier used to represent a directed edge in the graph.
     type Directed: DirectedGraphNodeId<Self>;
+    /// The storage type for a set of identifiers.
+    type Set: GraphNodeIdSet<Self>;
 }
 
 /// Trait for types that hold a pair of [`GraphNodeId`]s. Typically stored in a
@@ -180,5 +184,78 @@ impl<Id: GraphNodeId> DirectedGraphNodeId<Id> for (Id, Direction) {
 
     fn unpack(self) -> (Id, Direction) {
         self
+    }
+}
+
+/// Trait for types that store a set of [`GraphNodeId`]s.
+pub trait GraphNodeIdSet<Id: GraphNodeId>: Default {
+    /// Creates a new set with the given capacity.
+    fn with_capacity(capacity: usize) -> Self;
+
+    /// Returns true if the set contains the given identifier.
+    fn contains(&self, id: Id) -> bool;
+
+    /// Inserts the given identifier into the set.
+    fn insert(&mut self, id: Id);
+
+    /// Removes the given identifier from the set.
+    fn remove(&mut self, id: Id);
+
+    /// Clears the set, removing all identifiers.
+    fn clear(&mut self);
+
+    /// Unions the set with another set.
+    fn union_with(&mut self, other: &Self);
+}
+
+impl<Id: GraphNodeId + Into<usize>> GraphNodeIdSet<Id> for FixedBitSet {
+    fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity(capacity)
+    }
+
+    fn contains(&self, id: Id) -> bool {
+        self.contains(id.into())
+    }
+
+    fn insert(&mut self, id: Id) {
+        self.insert(id.into());
+    }
+
+    fn remove(&mut self, id: Id) {
+        self.remove(id.into());
+    }
+
+    fn clear(&mut self) {
+        self.clear();
+    }
+
+    fn union_with(&mut self, other: &Self) {
+        self.union_with(other);
+    }
+}
+
+impl<Id: GraphNodeId> GraphNodeIdSet<Id> for HashSet<Id> {
+    fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(capacity, FixedHasher)
+    }
+
+    fn contains(&self, id: Id) -> bool {
+        self.contains(&id)
+    }
+
+    fn insert(&mut self, id: Id) {
+        self.insert(id);
+    }
+
+    fn remove(&mut self, id: Id) {
+        self.remove(&id);
+    }
+
+    fn clear(&mut self) {
+        self.clear();
+    }
+
+    fn union_with(&mut self, other: &Self) {
+        self.extend(other.iter().cloned());
     }
 }

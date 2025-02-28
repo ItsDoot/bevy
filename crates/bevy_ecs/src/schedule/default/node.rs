@@ -1,5 +1,7 @@
 use core::fmt::{self, Debug};
 
+use fixedbitset::FixedBitSet;
+
 use crate::{
     prelude::SystemSet,
     result::Result,
@@ -142,9 +144,16 @@ impl NodeId {
     }
 }
 
+impl From<NodeId> for usize {
+    fn from(id: NodeId) -> Self {
+        id.index()
+    }
+}
+
 impl GraphNodeId for NodeId {
     type Pair = CompactNodeIdPair;
     type Directed = CompactNodeIdAndDirection;
+    type Set = FixedBitSet;
 }
 
 /// Compact storage of a [`NodeId`] and a [`Direction`].
