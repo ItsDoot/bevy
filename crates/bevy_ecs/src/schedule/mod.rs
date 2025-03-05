@@ -5,6 +5,7 @@ mod condition;
 mod config;
 pub mod default;
 mod executor;
+mod metadata;
 mod pass;
 mod schedule;
 mod set;
@@ -12,8 +13,7 @@ mod stepping;
 pub mod traits;
 
 use self::graph::*;
-pub use self::{condition::*, config::*, executor::*, schedule::*, set::*};
-pub use pass::ScheduleBuildPass;
+pub use self::{condition::*, config::*, executor::*, metadata::*, pass::*, schedule::*, set::*};
 
 /// An implementation of a graph data structure.
 pub mod graph;
@@ -128,7 +128,7 @@ mod tests {
     }
 
     mod system_ordering {
-        use crate::schedule::default::{IntoChainableNodeConfigs, IntoOrderedNodeConfigs};
+        use crate::schedule::{IntoChainableNodeConfigs, IntoOrderedNodeConfigs};
 
         use super::*;
 
@@ -256,9 +256,7 @@ mod tests {
     mod conditions {
         use crate::{
             change_detection::DetectChanges,
-            schedule::default::{
-                IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoOrderedNodeConfigs,
-            },
+            schedule::{IntoChainableNodeConfigs, IntoConditionalNodeConfigs},
         };
 
         use super::*;
@@ -538,8 +536,9 @@ mod tests {
     }
 
     mod schedule_build_errors {
-        use crate::schedule::default::{
-            DefaultBuildError, DefaultBuildSettings, IntoOrderedNodeConfigs, LogLevel,
+        use crate::schedule::{
+            default::{DefaultBuildError, DefaultBuildSettings, LogLevel},
+            IntoOrderedNodeConfigs,
         };
 
         use super::*;
@@ -736,10 +735,7 @@ mod tests {
         use super::*;
         use crate::{
             prelude::*,
-            schedule::{
-                default::{IntoConditionalNodeConfigs, IntoOrderedNodeConfigs},
-                traits::ScheduleGraph,
-            },
+            schedule::{traits::ScheduleGraph, IntoConditionalNodeConfigs, IntoOrderedNodeConfigs},
         };
 
         #[derive(Resource)]

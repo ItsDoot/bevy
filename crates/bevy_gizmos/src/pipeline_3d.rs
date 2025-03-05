@@ -15,7 +15,7 @@ use bevy_ecs::{
     prelude::Entity,
     query::Has,
     resource::Resource,
-    schedule::default::IntoOrderedNodeConfigs,
+    schedule::{IntoAmbiguousNodeConfigs, IntoHierarchicalNodeConfigs, IntoOrderedNodeConfigs},
     system::{Query, Res, ResMut},
     world::{FromWorld, World},
 };

@@ -592,12 +592,9 @@ mod tests {
     use crate::{
         prelude::{ApplyDeferred, Res, Resource},
         schedule::{
-            default::{
-                DefaultBuildSettings, IntoChainableNodeConfigs, IntoConditionalNodeConfigs,
-                IntoOrderedNodeConfigs,
-            },
-            tests::ResMut,
-            Schedule, SystemSet,
+            default::DefaultBuildSettings, tests::ResMut, IntoAmbiguousNodeConfigs,
+            IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoHierarchicalNodeConfigs,
+            IntoOrderedNodeConfigs, Schedule, SystemSet,
         },
         system::Commands,
         world::World,

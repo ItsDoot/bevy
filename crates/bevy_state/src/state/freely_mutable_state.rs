@@ -1,7 +1,7 @@
 use bevy_ecs::{
     event::EventWriter,
     prelude::Schedule,
-    schedule::default::IntoOrderedNodeConfigs,
+    schedule::IntoHierarchicalNodeConfigs,
     system::{Commands, IntoSystem, ResMut},
 };
 

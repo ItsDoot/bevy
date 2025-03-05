@@ -65,7 +65,7 @@ pub mod prelude {
 }
 
 use bevy_app::{prelude::*, Animation};
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, schedule::IntoAmbiguousNodeConfigs};
 use bevy_input::InputSystem;
 use bevy_render::{camera::CameraUpdateSystem, RenderApp};
 use bevy_transform::TransformSystem;

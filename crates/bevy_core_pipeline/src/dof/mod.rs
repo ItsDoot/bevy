@@ -23,7 +23,7 @@ use bevy_ecs::{
     query::{QueryItem, With},
     reflect::ReflectComponent,
     resource::Resource,
-    schedule::default::{IntoChainableNodeConfigs, IntoOrderedNodeConfigs},
+    schedule::{IntoChainableNodeConfigs, IntoHierarchicalNodeConfigs, IntoOrderedNodeConfigs},
     system::{lifetimeless::Read, Commands, Query, Res, ResMut},
     world::{FromWorld, World},
 };

@@ -3,8 +3,7 @@ use crate::systems::{
 };
 use bevy_app::{App, Plugin, PostStartup, PostUpdate};
 use bevy_ecs::schedule::{
-    default::{IntoChainableNodeConfigs, IntoOrderedNodeConfigs},
-    SystemSet,
+    IntoAmbiguousNodeConfigs, IntoChainableNodeConfigs, IntoHierarchicalNodeConfigs, SystemSet,
 };
 
 /// Set enum for the systems relating to transform propagation

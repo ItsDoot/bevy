@@ -7,12 +7,11 @@ use crate::{
     result::Result,
     schedule::{
         default::{
-            Conditions, DefaultBuildError, DefaultGraph, DefaultGroupMetadata, DefaultMetadata,
-            GraphInfo,
+            DefaultBuildError, DefaultGraph, DefaultGroupMetadata, DefaultMetadata, GraphInfo,
         },
         graph::Direction,
         traits::{DirectedGraphNodeId, GraphNode, GraphNodeId, GraphNodeIdPair, ProcessedConfigs},
-        FallibleSystem, InternedSystemSet, NodeConfig, NodeConfigs,
+        Conditions, FallibleSystem, Hierarchy, InternedSystemSet, NodeConfig, NodeConfigs,
     },
     system::BoxedSystem,
 };
@@ -36,7 +35,7 @@ impl GraphNode<DefaultGraph> for FallibleSystem {
             node: self,
             metadata: DefaultMetadata {
                 graph_info: GraphInfo {
-                    hierarchy: sets,
+                    hierarchy: Hierarchy(sets),
                     ..Default::default()
                 },
                 conditions: Conditions::default(),
@@ -240,4 +239,4 @@ impl Debug for CompactNodeIdPair {
 }
 
 /// Metadata returned by [`GraphNode`]s when processing a group of nodes.
-pub struct DenselyChained(pub(crate) bool);
+pub struct DenselyChained(pub bool);

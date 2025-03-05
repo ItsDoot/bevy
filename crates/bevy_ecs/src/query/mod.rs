@@ -111,7 +111,7 @@ mod tests {
             ArchetypeFilter, FilteredAccess, Has, QueryCombinationIter, QueryData,
             ReadOnlyQueryData, WorldQuery,
         },
-        schedule::{default::IntoChainableNodeConfigs, Schedule},
+        schedule::{IntoChainableNodeConfigs, Schedule},
         storage::{Table, TableRow},
         system::{assert_is_system, IntoSystem, Query, System, SystemState},
         world::{unsafe_world_cell::UnsafeWorldCell, World},

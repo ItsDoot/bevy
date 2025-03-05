@@ -133,7 +133,8 @@ impl<T> SystemSet for SystemTypeSet<T> {
 pub struct AnonymousSet(usize);
 
 impl AnonymousSet {
-    pub(crate) fn new(id: usize) -> Self {
+    /// Creates a new anonymous set with the given ID.
+    pub fn new(id: usize) -> Self {
         Self(id)
     }
 }

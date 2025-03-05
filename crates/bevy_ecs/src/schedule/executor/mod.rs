@@ -270,10 +270,8 @@ mod tests {
     use crate::{
         prelude::{Resource, Schedule, SystemSet},
         schedule::{
-            default::{
-                IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoOrderedNodeConfigs,
-            },
-            ExecutorKind,
+            ExecutorKind, IntoChainableNodeConfigs, IntoConditionalNodeConfigs,
+            IntoHierarchicalNodeConfigs,
         },
         system::{Commands, Res, WithParamWarnPolicy},
         world::World,

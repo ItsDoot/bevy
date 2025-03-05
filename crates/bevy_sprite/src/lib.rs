@@ -39,7 +39,7 @@ pub use texture_slice::*;
 use bevy_app::prelude::*;
 use bevy_asset::{load_internal_asset, weak_handle, AssetEvents, Assets, Handle};
 use bevy_core_pipeline::core_2d::{AlphaMask2d, Opaque2d, Transparent2d};
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, schedule::IntoAmbiguousNodeConfigs};
 use bevy_image::{prelude::*, TextureAtlasPlugin};
 use bevy_render::{
     batching::sort_binned_render_phase,

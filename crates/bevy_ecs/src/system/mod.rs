@@ -353,9 +353,9 @@ mod tests {
         resource::Resource,
         result::Result,
         schedule::{
-            common_conditions::resource_exists,
-            default::{DefaultGraph, IntoChainableNodeConfigs, IntoConditionalNodeConfigs},
-            ApplyDeferred, Condition, FallibleSystem, IntoNodeConfigs, Schedule,
+            common_conditions::resource_exists, default::DefaultGraph, ApplyDeferred, Condition,
+            FallibleSystem, IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoNodeConfigs,
+            Schedule,
         },
         system::{
             assert_is_node_config, Commands, In, IntoSystem, Local, NonSend, NonSendMut, ParamSet,

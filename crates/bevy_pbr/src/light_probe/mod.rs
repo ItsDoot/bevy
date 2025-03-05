@@ -10,7 +10,7 @@ use bevy_ecs::{
     query::With,
     reflect::ReflectComponent,
     resource::Resource,
-    schedule::default::IntoOrderedNodeConfigs,
+    schedule::IntoHierarchicalNodeConfigs,
     system::{Commands, Local, Query, Res, ResMut},
 };
 use bevy_image::Image;

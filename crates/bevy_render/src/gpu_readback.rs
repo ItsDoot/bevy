@@ -20,7 +20,7 @@ use bevy_ecs::{
     entity::Entity,
     event::Event,
     prelude::{Component, Resource, World},
-    schedule::default::IntoOrderedNodeConfigs,
+    schedule::{IntoAmbiguousNodeConfigs, IntoHierarchicalNodeConfigs, IntoOrderedNodeConfigs},
     system::{Query, Res},
 };
 use bevy_image::{Image, TextureFormatPixelInfo};

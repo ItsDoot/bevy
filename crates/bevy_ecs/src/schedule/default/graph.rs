@@ -20,19 +20,20 @@ use crate::{
     query::AccessConflicts,
     schedule::{
         default::{
-            Chain, DefaultGraphExecutable, DefaultGroupMetadata, DefaultMetadata, DenselyChained,
+            DefaultGraphExecutable, DefaultGroupMetadata, DefaultMetadata, DenselyChained,
             GraphInfo, NodeId, ScheduledSystem,
         },
         graph::{
-            check_graph, index, simple_cycles_in_component, Ambiguity, CheckGraphResults, Dag,
-            Dependency, DependencyKind, DiGraph, Direction::*, UnGraph,
+            check_graph, index, simple_cycles_in_component, CheckGraphResults, Dag, DiGraph,
+            Direction::*, UnGraph,
         },
         pass::ScheduleBuildPassObj,
         passes::AutoInsertApplyDeferredPass,
         traits::{GraphNode, ProcessedConfigs, ScheduleGraph},
-        AnonymousSet, BoxedCondition, ExecutorKind, FallibleSystem, InternedScheduleLabel,
-        InternedSystemSet, MultiThreadedExecutor, NodeConfig, NodeConfigs, ReportCycles,
-        ScheduleBuildPass, ScheduleExecutor, SimpleExecutor, SingleThreadedExecutor, SystemSet,
+        Ambiguities, AnonymousSet, BoxedCondition, Chain, Dependencies, Dependency, DependencyKind,
+        ExecutorKind, FallibleSystem, Hierarchy, InternedScheduleLabel, InternedSystemSet,
+        MultiThreadedExecutor, NodeConfig, NodeConfigs, ReportCycles, ScheduleBuildPass,
+        ScheduleExecutor, SimpleExecutor, SingleThreadedExecutor, SystemSet,
     },
     storage::SparseSetIndex,
     world::World,
@@ -415,9 +416,9 @@ impl DefaultGraph {
     fn check_hierarchy_sets(
         &mut self,
         id: &NodeId,
-        graph_info: &GraphInfo,
+        hierarchy: &Hierarchy<InternedSystemSet>,
     ) -> Result<(), DefaultBuildError> {
-        for &set in &graph_info.hierarchy {
+        for &set in &hierarchy.0 {
             self.check_hierarchy_set(id, set)?;
         }
 
@@ -429,9 +430,10 @@ impl DefaultGraph {
     fn check_edges(
         &mut self,
         id: &NodeId,
-        graph_info: &GraphInfo,
+        dependencies: &Dependencies<InternedSystemSet>,
+        ambiguities: &Ambiguities<InternedSystemSet>,
     ) -> Result<(), DefaultBuildError> {
-        for Dependency { set, .. } in &graph_info.dependencies {
+        for Dependency { target: set, .. } in &dependencies.0 {
             match self.system_set_ids.get(set) {
                 Some(set_id) => {
                     if id == set_id {
@@ -444,7 +446,7 @@ impl DefaultGraph {
             }
         }
 
-        if let Ambiguity::IgnoreWithSet(ambiguous_with) = &graph_info.ambiguous_with {
+        if let Ambiguities::IgnoreAnyFrom(ambiguous_with) = &ambiguities {
             for set in ambiguous_with {
                 if !self.system_set_ids.contains_key(set) {
                     self.add_set(*set);
@@ -461,8 +463,8 @@ impl DefaultGraph {
         id: NodeId,
         graph_info: GraphInfo,
     ) -> Result<(), DefaultBuildError> {
-        self.check_hierarchy_sets(&id, &graph_info)?;
-        self.check_edges(&id, &graph_info)?;
+        self.check_hierarchy_sets(&id, &graph_info.hierarchy)?;
+        self.check_edges(&id, &graph_info.dependencies, &graph_info.ambiguous_with)?;
         self.changed = true;
 
         let GraphInfo {
@@ -475,17 +477,20 @@ impl DefaultGraph {
         self.hierarchy.graph.add_node(id);
         self.dependency.graph.add_node(id);
 
-        for set in sets.into_iter().map(|set| self.system_set_ids[&set]) {
+        for set in sets.0.into_iter().map(|set| self.system_set_ids[&set]) {
             self.hierarchy.graph.add_edge(set, id);
 
             // ensure set also appears in dependency graph
             self.dependency.graph.add_node(set);
         }
 
-        for (kind, set, options) in dependencies
-            .into_iter()
-            .map(|Dependency { kind, set, options }| (kind, self.system_set_ids[&set], options))
-        {
+        for (kind, set, options) in dependencies.0.into_iter().map(
+            |Dependency {
+                 kind,
+                 target: set,
+                 options,
+             }| (kind, self.system_set_ids[&set], options),
+        ) {
             let (lhs, rhs) = match kind {
                 DependencyKind::Before => (id, set),
                 DependencyKind::After => (set, id),
@@ -500,8 +505,8 @@ impl DefaultGraph {
         }
 
         match ambiguous_with {
-            Ambiguity::Check => (),
-            Ambiguity::IgnoreWithSet(ambiguous_with) => {
+            Ambiguities::Check => (),
+            Ambiguities::IgnoreAnyFrom(ambiguous_with) => {
                 for set in ambiguous_with
                     .into_iter()
                     .map(|set| self.system_set_ids[&set])
@@ -509,7 +514,7 @@ impl DefaultGraph {
                     self.ambiguous_with.add_edge(id, set);
                 }
             }
-            Ambiguity::IgnoreAll => {
+            Ambiguities::IgnoreAll => {
                 self.ambiguous_with_all.insert(id);
             }
         }

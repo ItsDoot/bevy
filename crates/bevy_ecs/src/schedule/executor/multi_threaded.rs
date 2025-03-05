@@ -807,10 +807,7 @@ impl MainThreadExecutor {
 mod tests {
     use crate::{
         prelude::Resource,
-        schedule::{
-            default::{IntoChainableNodeConfigs, IntoConditionalNodeConfigs},
-            ExecutorKind, Schedule,
-        },
+        schedule::{ExecutorKind, IntoChainableNodeConfigs, IntoConditionalNodeConfigs, Schedule},
         system::Commands,
         world::World,
     };

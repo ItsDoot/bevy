@@ -16,6 +16,7 @@ use bevy_app::{App, Plugin, PostUpdate};
 use bevy_asset::{AssetApp, AssetEvents, AssetId, RenderAssetUsages};
 use bevy_ecs::{
     prelude::*,
+    schedule::IntoAmbiguousNodeConfigs,
     system::{
         lifetimeless::{SRes, SResMut},
         SystemParamItem,

@@ -104,7 +104,7 @@ where
 mod tests {
     use super::*;
     use crate::prelude::KeyCode;
-    use bevy_ecs::schedule::{default::IntoConditionalNodeConfigs, Schedule};
+    use bevy_ecs::schedule::{IntoConditionalNodeConfigs, Schedule};
 
     fn test_system() {}
 

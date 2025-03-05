@@ -40,6 +40,7 @@ use bevy_app::{prelude::*, RunFixedMainLoop};
 use bevy_ecs::{
     event::{event_update_system, signal_event_update_system, EventRegistry, ShouldUpdateEvents},
     prelude::*,
+    schedule::IntoAmbiguousNodeConfigs,
 };
 use bevy_platform_support::time::Instant;
 use core::time::Duration;

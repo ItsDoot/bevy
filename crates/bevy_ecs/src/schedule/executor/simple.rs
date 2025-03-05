@@ -176,7 +176,7 @@ fn evaluate_and_fold_conditions(conditions: &mut [BoxedCondition], world: &mut W
 fn skip_automatic_sync_points() {
     // Schedules automatically insert ApplyDeferred systems, but these should
     // not be executed as they only serve as markers and are not initialized
-    use crate::{prelude::*, schedule::default::IntoChainableNodeConfigs};
+    use crate::{prelude::*, schedule::IntoChainableNodeConfigs};
     let mut sched = Schedule::default();
     sched.set_executor_kind(ExecutorKind::Simple);
     sched.add_systems((|_: Commands| (), || ()).chain());

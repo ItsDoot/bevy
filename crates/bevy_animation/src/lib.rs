@@ -33,7 +33,7 @@ use crate::{
 
 use bevy_app::{Animation, App, Plugin, PostUpdate};
 use bevy_asset::{Asset, AssetApp, AssetEvents, Assets};
-use bevy_ecs::{prelude::*, world::EntityMutExcept};
+use bevy_ecs::{prelude::*, schedule::IntoAmbiguousNodeConfigs, world::EntityMutExcept};
 use bevy_math::FloatOrd;
 use bevy_platform_support::{collections::HashMap, hash::NoOpHash};
 use bevy_reflect::{prelude::ReflectDefault, Reflect, TypePath};

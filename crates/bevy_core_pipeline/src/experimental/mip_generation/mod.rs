@@ -16,8 +16,9 @@ use bevy_ecs::{
     prelude::{resource_exists, Without},
     query::{Or, QueryState, With},
     resource::Resource,
-    schedule::default::{
-        IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoOrderedNodeConfigs,
+    schedule::{
+        IntoChainableNodeConfigs, IntoConditionalNodeConfigs, IntoHierarchicalNodeConfigs,
+        IntoOrderedNodeConfigs,
     },
     system::{lifetimeless::Read, Commands, Local, Query, Res, ResMut},
     world::{FromWorld, World},

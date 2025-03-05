@@ -25,7 +25,7 @@ use bevy_ecs::{
     prelude::ReflectComponent,
     query::With,
     resource::Resource,
-    schedule::default::IntoOrderedNodeConfigs,
+    schedule::{IntoHierarchicalNodeConfigs, IntoOrderedNodeConfigs},
     system::{Query, Res, ResMut},
 };
 use bevy_image::Image;

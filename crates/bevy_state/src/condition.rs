@@ -171,7 +171,7 @@ pub fn state_changed<S: States>(current_state: Option<Res<State<S>>>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use bevy_ecs::schedule::{default::IntoConditionalNodeConfigs, Condition, Schedule};
+    use bevy_ecs::schedule::{Condition, IntoConditionalNodeConfigs, Schedule};
 
     use crate::prelude::*;
     use bevy_state_macros::States;

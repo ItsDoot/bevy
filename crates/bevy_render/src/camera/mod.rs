@@ -4,7 +4,7 @@ mod clear_color;
 mod manual_texture_view;
 mod projection;
 
-use bevy_ecs::schedule::default::IntoOrderedNodeConfigs;
+use bevy_ecs::schedule::IntoHierarchicalNodeConfigs;
 pub use camera::*;
 pub use camera_driver_node::*;
 pub use clear_color::*;

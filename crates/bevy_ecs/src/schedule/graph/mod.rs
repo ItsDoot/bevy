@@ -1,16 +1,11 @@
-use alloc::{boxed::Box, vec, vec::Vec};
-use core::{
-    any::{Any, TypeId},
-    fmt::Debug,
-};
+use alloc::{vec, vec::Vec};
 use smallvec::SmallVec;
 
 use bevy_platform_support::collections::{HashMap, HashSet};
-use bevy_utils::TypeIdMap;
 
 use fixedbitset::FixedBitSet;
 
-use crate::schedule::{set::*, traits::GraphNodeId};
+use crate::schedule::traits::GraphNodeId;
 
 mod graph_map;
 mod tarjan_scc;
@@ -32,47 +27,6 @@ impl<Id: GraphNodeId> Default for Dag<Id> {
             topsort: Default::default(),
         }
     }
-}
-
-/// Specifies what kind of edge should be added to the dependency graph.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub(crate) enum DependencyKind {
-    /// A node that should be preceded.
-    Before,
-    /// A node that should be succeeded.
-    After,
-}
-
-/// An edge to be added to the dependency graph.
-pub(crate) struct Dependency {
-    pub(crate) kind: DependencyKind,
-    pub(crate) set: InternedSystemSet,
-    pub(crate) options: TypeIdMap<Box<dyn Any>>,
-}
-
-impl Dependency {
-    pub fn new(kind: DependencyKind, set: InternedSystemSet) -> Self {
-        Self {
-            kind,
-            set,
-            options: Default::default(),
-        }
-    }
-    pub fn add_config<T: 'static>(mut self, option: T) -> Self {
-        self.options.insert(TypeId::of::<T>(), Box::new(option));
-        self
-    }
-}
-
-/// Configures ambiguity detection for a single system.
-#[derive(Clone, Debug, Default)]
-pub(crate) enum Ambiguity {
-    #[default]
-    Check,
-    /// Ignore warnings with systems in any of these system sets. May contain duplicates.
-    IgnoreWithSet(Vec<InternedSystemSet>),
-    /// Ignore all warnings.
-    IgnoreAll,
 }
 
 /// Converts 2D row-major pair of indices into a 1D array index.

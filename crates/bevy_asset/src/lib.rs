@@ -219,7 +219,10 @@ use alloc::{
 use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
 use bevy_ecs::{
     prelude::Component,
-    schedule::default::{IntoConditionalNodeConfigs, IntoOrderedNodeConfigs},
+    schedule::{
+        IntoAmbiguousNodeConfigs, IntoConditionalNodeConfigs, IntoHierarchicalNodeConfigs,
+        IntoOrderedNodeConfigs,
+    },
 };
 use bevy_ecs::{reflect::AppTypeRegistry, schedule::SystemSet, world::FromWorld};
 use bevy_platform_support::collections::HashSet;

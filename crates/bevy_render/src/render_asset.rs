@@ -7,8 +7,7 @@ use bevy_asset::{Asset, AssetEvent, AssetId, Assets};
 use bevy_ecs::{
     prelude::{Commands, EventReader, ResMut, Resource},
     schedule::{
-        default::{IntoOrderedNodeConfigs, SystemConfigs},
-        SystemSet,
+        default::SystemConfigs, IntoHierarchicalNodeConfigs, IntoOrderedNodeConfigs, SystemSet,
     },
     system::{StaticSystemParam, SystemParam, SystemParamItem, SystemState},
     world::{FromWorld, Mut},

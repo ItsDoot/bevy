@@ -85,14 +85,10 @@ pub mod prelude {
         resource::Resource,
         result::{Error, Result},
         schedule::{
-            apply_deferred,
-            common_conditions::*,
-            default::{
-                IntoChainableNodeConfigs as _, IntoConditionalNodeConfigs as _,
-                IntoOrderedNodeConfigs as _,
-            },
-            ApplyDeferred, Condition, IntoNodeConfigs, IntoSystemSet, Schedule, Schedules,
-            SystemSet,
+            apply_deferred, common_conditions::*, ApplyDeferred, Condition,
+            IntoChainableNodeConfigs as _, IntoConditionalNodeConfigs as _,
+            IntoHierarchicalNodeConfigs as _, IntoNodeConfigs, IntoOrderedNodeConfigs as _,
+            IntoSystemSet, Schedule, Schedules, SystemSet,
         },
         spawn::{Spawn, SpawnRelated},
         system::{

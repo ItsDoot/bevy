@@ -324,10 +324,7 @@ use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::{
     entity::Entity,
     resource::Resource,
-    schedule::{
-        default::{IntoChainableNodeConfigs, IntoOrderedNodeConfigs},
-        ScheduleLabel, SystemSet,
-    },
+    schedule::{IntoChainableNodeConfigs, IntoHierarchicalNodeConfigs, ScheduleLabel, SystemSet},
     system::{Commands, In, IntoSystem, ResMut, System, SystemId},
     world::World,
 };

@@ -70,7 +70,7 @@ use bevy_app::{prelude::*, Animation};
 #[cfg(feature = "default_font")]
 use bevy_asset::{load_internal_binary_asset, Handle};
 use bevy_asset::{AssetApp, AssetEvents};
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, schedule::IntoAmbiguousNodeConfigs};
 use bevy_render::{
     camera::CameraUpdateSystem, view::VisibilitySystems, ExtractSchedule, RenderApp,
 };

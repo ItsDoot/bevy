@@ -1,6 +1,6 @@
 use bevy_ecs::{
     event::{EventReader, EventWriter},
-    schedule::{default::IntoOrderedNodeConfigs, Schedule},
+    schedule::{IntoHierarchicalNodeConfigs, IntoOrderedNodeConfigs, Schedule},
     system::{Commands, IntoSystem, Res, ResMut},
 };
 use variadics_please::all_tuples;

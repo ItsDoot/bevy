@@ -11,7 +11,7 @@ use bevy_ecs::{
     prelude::Local,
     query::With,
     resource::Resource,
-    schedule::{common_conditions::resource_changed, default::IntoConditionalNodeConfigs},
+    schedule::{common_conditions::resource_changed, IntoConditionalNodeConfigs},
     system::{Commands, Query, Res},
 };
 use bevy_render::view::Visibility;

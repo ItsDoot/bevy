@@ -238,7 +238,7 @@ pub fn paused(time: Res<Time<Virtual>>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::schedule::{default::IntoConditionalNodeConfigs, Schedule};
+    use bevy_ecs::schedule::{IntoConditionalNodeConfigs, Schedule};
 
     fn test_system() {}
 

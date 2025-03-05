@@ -23,7 +23,7 @@ use winit::{event_loop::EventLoop, window::WindowId};
 
 use bevy_a11y::AccessibilityRequested;
 use bevy_app::{App, Last, Plugin};
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, schedule::IntoAmbiguousNodeConfigs};
 use bevy_window::{exit_on_all_closed, Window, WindowCreated};
 use system::{changed_windows, check_keyboard_focus_lost, despawn_windows};
 pub use system::{create_monitors, create_windows};

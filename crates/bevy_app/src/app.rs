@@ -1449,7 +1449,7 @@ mod tests {
         query::With,
         removal_detection::RemovedComponents,
         resource::Resource,
-        schedule::{default::IntoOrderedNodeConfigs, ScheduleLabel},
+        schedule::{IntoOrderedNodeConfigs, ScheduleLabel},
         system::{Commands, Query},
         world::{FromWorld, World},
     };

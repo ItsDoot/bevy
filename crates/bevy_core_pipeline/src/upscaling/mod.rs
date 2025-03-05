@@ -1,6 +1,6 @@
 use crate::blit::{BlitPipeline, BlitPipelineKey};
 use bevy_app::prelude::*;
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, schedule::IntoAmbiguousNodeConfigs};
 use bevy_platform_support::collections::HashSet;
 use bevy_render::{
     camera::{CameraOutputMode, ExtractedCamera},

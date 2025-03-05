@@ -13,7 +13,10 @@
 //! This example demonstrates how you might detect and resolve (or silence) these ambiguities.
 
 use bevy::prelude::*;
-use bevy_ecs::schedule::default::{DefaultBuildSettings, LogLevel};
+use bevy_ecs::schedule::{
+    default::{DefaultBuildSettings, LogLevel},
+    IntoAmbiguousNodeConfigs,
+};
 
 fn main() {
     App::new()

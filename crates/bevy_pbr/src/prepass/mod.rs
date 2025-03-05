@@ -29,6 +29,7 @@ use bevy_core_pipeline::{
 };
 use bevy_ecs::{
     prelude::*,
+    schedule::IntoAmbiguousNodeConfigs,
     system::{
         lifetimeless::{Read, SRes},
         SystemParamItem,

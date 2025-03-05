@@ -1267,10 +1267,7 @@ mod tests {
         change_detection::ResMut,
         component::Component,
         query::With,
-        schedule::{
-            default::{IntoChainableNodeConfigs, IntoConditionalNodeConfigs},
-            Schedule,
-        },
+        schedule::{IntoChainableNodeConfigs, IntoConditionalNodeConfigs, Schedule},
         system::Local,
         world::World,
     };

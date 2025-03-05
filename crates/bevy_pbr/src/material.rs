@@ -21,6 +21,7 @@ use bevy_core_pipeline::{
 };
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::component::Tick;
+use bevy_ecs::schedule::IntoAmbiguousNodeConfigs;
 use bevy_ecs::system::SystemChangeTick;
 use bevy_ecs::{
     prelude::*,

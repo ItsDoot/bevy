@@ -293,7 +293,7 @@ mod tests {
         component::Component,
         event::EventWriter,
         resource::Resource,
-        schedule::default::IntoOrderedNodeConfigs,
+        schedule::IntoOrderedNodeConfigs,
         system::{Commands, IntoSystem, Local, Query, Res, ResMut},
     };
     use bevy_reflect::TypePath;

@@ -8,8 +8,8 @@ use fixedbitset::FixedBitSet;
 use crate::{
     component::Tick,
     schedule::{
-        graph::Direction, InternedScheduleLabel, NodeConfig, NodeConfigs, ScheduleBuildPass,
-        ScheduleExecutor,
+        graph::Direction, Dependencies, Hierarchy, InternedScheduleLabel, NodeConfig, NodeConfigs,
+        ScheduleBuildPass, ScheduleExecutor,
     },
     world::World,
 };
@@ -258,4 +258,26 @@ impl<Id: GraphNodeId> GraphNodeIdSet<Id> for HashSet<Id> {
     fn union_with(&mut self, other: &Self) {
         self.extend(other.iter().cloned());
     }
+}
+
+/// [`ScheduleGraph`] specialization for graphs that have [`GraphNode`]s with
+/// [`Hierarchy`] information.
+pub trait HierarchicalScheduleGraph<T>: ScheduleGraph {
+    /// Adds hierarchy information to the graph for the given target node.
+    fn add_hierarchy(
+        &mut self,
+        target: Self::Id,
+        hierarchy: Hierarchy<T>,
+    ) -> Result<(), Self::BuildError>;
+}
+
+/// [`ScheduleGraph`] specialization for graphs that have dependencies between
+/// [`GraphNode`]s.
+pub trait DependentScheduleGraph<T>: ScheduleGraph {
+    /// Adds dependencies to the graph for the given source node.
+    fn add_dependencies(
+        &mut self,
+        source: Self::Id,
+        dependencies: Dependencies<T>,
+    ) -> Result<(), Self::BuildError>;
 }
