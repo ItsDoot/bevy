@@ -274,7 +274,7 @@ where
 
 impl<Id: GraphNodeId, S: BuildHasher> DiGraph<Id, S> {
     /// Iterate over all *Strongly Connected Components* in this graph.
-    pub(crate) fn iter_sccs(&self) -> impl Iterator<Item = SmallVec<[Id; 4]>> + '_ {
+    pub fn iter_sccs(&self) -> impl Iterator<Item = SmallVec<[Id; 4]>> + '_ {
         super::tarjan_scc::new_tarjan_scc(self)
     }
 }

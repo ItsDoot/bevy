@@ -41,17 +41,17 @@ pub(crate) fn row_col(index: usize, num_cols: usize) -> (usize, usize) {
 }
 
 /// Stores the results of the graph analysis.
-pub(crate) struct CheckGraphResults<Id: GraphNodeId> {
+pub struct CheckGraphResults<Id: GraphNodeId> {
     /// Boolean reachability matrix for the graph.
-    pub(crate) reachable: FixedBitSet,
+    pub reachable: FixedBitSet,
     /// Pairs of nodes that have a path connecting them.
-    pub(crate) connected: HashSet<(Id, Id)>,
+    pub connected: HashSet<(Id, Id)>,
     /// Pairs of nodes that don't have a path connecting them.
-    pub(crate) disconnected: Vec<(Id, Id)>,
+    pub disconnected: Vec<(Id, Id)>,
     /// Edges that are redundant because a longer path exists.
-    pub(crate) transitive_edges: Vec<(Id, Id)>,
+    pub transitive_edges: Vec<(Id, Id)>,
     /// Variant of the graph with no transitive edges.
-    pub(crate) transitive_reduction: DiGraph<Id>,
+    pub transitive_reduction: DiGraph<Id>,
     /// Variant of the graph with all possible transitive edges.
     // TODO: this will very likely be used by "if-needed" ordering
     #[expect(dead_code, reason = "See the TODO above this attribute.")]
@@ -82,7 +82,7 @@ impl<Id: GraphNodeId> Default for CheckGraphResults<Id> {
 /// ["On the calculation of transitive reduction-closure of orders"][1] by Habib, Morvan and Rampon.
 ///
 /// [1]: https://doi.org/10.1016/0012-365X(93)90164-O
-pub(crate) fn check_graph<Id: GraphNodeId>(
+pub fn check_graph<Id: GraphNodeId>(
     graph: &DiGraph<Id>,
     topological_order: &[Id],
 ) -> CheckGraphResults<Id> {
