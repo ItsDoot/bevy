@@ -40,6 +40,7 @@ pub mod pipelined_rendering;
 pub mod primitives;
 pub mod render_asset;
 pub mod render_graph;
+pub mod render_graph2;
 pub mod render_phase;
 pub mod render_resource;
 pub mod renderer;
