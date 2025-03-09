@@ -24,16 +24,16 @@ use crate::{
             GraphInfo, NodeId, ScheduledSystem,
         },
         graph::{
-            check_graph, index, simple_cycles_in_component, CheckGraphResults, Dag, DiGraph,
-            Direction::*, UnGraph,
+            check_graph, index, toposort_graph, CheckGraphResults, Dag, DiGraph, Direction::*,
+            UnGraph,
         },
         pass::ScheduleBuildPassObj,
         passes::AutoInsertApplyDeferredPass,
-        traits::{GraphNode, ProcessedConfigs, ScheduleGraph},
+        traits::{GraphNode, GraphNodeId, ProcessedConfigs, ScheduleGraph},
         Ambiguities, AnonymousSet, BoxedCondition, Chain, Dependencies, Dependency, DependencyKind,
         ExecutorKind, FallibleSystem, Hierarchy, InternedScheduleLabel, InternedSystemSet,
-        MultiThreadedExecutor, NodeConfig, NodeConfigs, ReportCycles, ScheduleBuildPass,
-        ScheduleExecutor, SimpleExecutor, SingleThreadedExecutor, SystemSet,
+        MultiThreadedExecutor, NodeConfig, NodeConfigs, ScheduleBuildPass, ScheduleExecutor,
+        SimpleExecutor, SingleThreadedExecutor, SystemSet,
     },
     storage::SparseSetIndex,
     world::World,
@@ -394,7 +394,7 @@ impl DefaultGraph {
         match self.system_set_ids.get(&set) {
             Some(set_id) => {
                 if id == set_id {
-                    return Err(DefaultBuildError::HierarchyLoop(self.get_node_name(id)));
+                    return Err(DefaultBuildError::HierarchyLoop(self.node_name(*id)));
                 }
             }
             None => {
@@ -437,7 +437,7 @@ impl DefaultGraph {
             match self.system_set_ids.get(set) {
                 Some(set_id) => {
                     if id == set_id {
-                        return Err(DefaultBuildError::DependencyLoop(self.get_node_name(id)));
+                        return Err(DefaultBuildError::DependencyLoop(self.node_name(*id)));
                     }
                 }
                 None => {
@@ -534,8 +534,8 @@ impl DefaultGraph {
         ignored_ambiguities: &BTreeSet<ComponentId>,
     ) -> Result<DefaultGraphExecutable, DefaultBuildError> {
         // check hierarchy for cycles
-        self.hierarchy.topsort =
-            self.topsort_graph(&self.hierarchy.graph, ReportCycles::Hierarchy)?;
+        self.hierarchy.topsort = toposort_graph(&self.hierarchy.graph)
+            .map_err(|e| DefaultBuildError::HierarchyCycle(e.hierarchy_cycle(self)))?;
 
         let hier_results = check_graph(&self.hierarchy.graph, &self.hierarchy.topsort);
         self.optionally_check_hierarchy_conflicts(&hier_results.transitive_edges, schedule_label)?;
@@ -544,8 +544,8 @@ impl DefaultGraph {
         self.hierarchy.graph = hier_results.transitive_reduction;
 
         // check dependencies for cycles
-        self.dependency.topsort =
-            self.topsort_graph(&self.dependency.graph, ReportCycles::Dependency)?;
+        self.dependency.topsort = toposort_graph(&self.dependency.graph)
+            .map_err(|e| DefaultBuildError::DependencyCycle(e.dependency_cycle(self)))?;
 
         // check for systems or system sets depending on sets they belong to
         let dep_results = check_graph(&self.dependency.graph, &self.dependency.topsort);
@@ -571,7 +571,8 @@ impl DefaultGraph {
 
         // topsort
         let mut dependency_flattened_dag = Dag {
-            topsort: self.topsort_graph(&dependency_flattened, ReportCycles::Dependency)?,
+            topsort: toposort_graph(&dependency_flattened)
+                .map_err(|e| DefaultBuildError::DependencyCycle(e.dependency_cycle(self)))?,
             graph: dependency_flattened,
         };
 
@@ -865,10 +866,6 @@ impl DefaultGraph {
 
 // methods for reporting errors
 impl DefaultGraph {
-    fn get_node_name(&self, id: &NodeId) -> String {
-        self.get_node_name_inner(id, self.settings.report_sets)
-    }
-
     #[inline]
     fn get_node_name_inner(&self, id: &NodeId, report_sets: bool) -> String {
         let name = match id {
@@ -916,13 +913,6 @@ impl DefaultGraph {
         )
     }
 
-    fn get_node_kind(&self, id: &NodeId) -> &'static str {
-        match id {
-            NodeId::System(_) => "system",
-            NodeId::Set(_) => "system set",
-        }
-    }
-
     /// If [`ScheduleBuildSettings::hierarchy_detection`] is [`LogLevel::Ignore`] this check
     /// is skipped.
     fn optionally_check_hierarchy_conflicts(
@@ -957,108 +947,11 @@ impl DefaultGraph {
             writeln!(
                 message,
                 " -- {} `{}` cannot be child of set `{}`, longer path exists",
-                self.get_node_kind(child),
-                self.get_node_name(child),
-                self.get_node_name(parent),
+                child.kind(),
+                self.node_name(*child),
+                self.node_name(*parent),
             )
             .unwrap();
-        }
-
-        message
-    }
-
-    /// Tries to topologically sort `graph`.
-    ///
-    /// If the graph is acyclic, returns [`Ok`] with the list of [`NodeId`] in a valid
-    /// topological order. If the graph contains cycles, returns [`Err`] with the list of
-    /// strongly-connected components that contain cycles (also in a valid topological order).
-    ///
-    /// # Errors
-    ///
-    /// If the graph contain cycles, then an error is returned.
-    pub fn topsort_graph(
-        &self,
-        graph: &DiGraph<NodeId>,
-        report: ReportCycles,
-    ) -> Result<Vec<NodeId>, DefaultBuildError> {
-        // Tarjan's SCC algorithm returns elements in *reverse* topological order.
-        let mut top_sorted_nodes = Vec::with_capacity(graph.node_count());
-        let mut sccs_with_cycles = Vec::new();
-
-        for scc in graph.iter_sccs() {
-            // A strongly-connected component is a group of nodes who can all reach each other
-            // through one or more paths. If an SCC contains more than one node, there must be
-            // at least one cycle within them.
-            top_sorted_nodes.extend_from_slice(&scc);
-            if scc.len() > 1 {
-                sccs_with_cycles.push(scc);
-            }
-        }
-
-        if sccs_with_cycles.is_empty() {
-            // reverse to get topological order
-            top_sorted_nodes.reverse();
-            Ok(top_sorted_nodes)
-        } else {
-            let mut cycles = Vec::new();
-            for scc in &sccs_with_cycles {
-                cycles.append(&mut simple_cycles_in_component(graph, scc));
-            }
-
-            let error = match report {
-                ReportCycles::Hierarchy => DefaultBuildError::HierarchyCycle(
-                    self.get_hierarchy_cycles_error_message(&cycles),
-                ),
-                ReportCycles::Dependency => DefaultBuildError::DependencyCycle(
-                    self.get_dependency_cycles_error_message(&cycles),
-                ),
-            };
-
-            Err(error)
-        }
-    }
-
-    /// Logs details of cycles in the hierarchy graph.
-    fn get_hierarchy_cycles_error_message(&self, cycles: &[Vec<NodeId>]) -> String {
-        let mut message = format!("schedule has {} in_set cycle(s):\n", cycles.len());
-        for (i, cycle) in cycles.iter().enumerate() {
-            let mut names = cycle.iter().map(|id| self.get_node_name(id));
-            let first_name = names.next().unwrap();
-            writeln!(
-                message,
-                "cycle {}: set `{first_name}` contains itself",
-                i + 1,
-            )
-            .unwrap();
-            writeln!(message, "set `{first_name}`").unwrap();
-            for name in names.chain(core::iter::once(first_name)) {
-                writeln!(message, " ... which contains set `{name}`").unwrap();
-            }
-            writeln!(message).unwrap();
-        }
-
-        message
-    }
-
-    /// Logs details of cycles in the dependency graph.
-    fn get_dependency_cycles_error_message(&self, cycles: &[Vec<NodeId>]) -> String {
-        let mut message = format!("schedule has {} before/after cycle(s):\n", cycles.len());
-        for (i, cycle) in cycles.iter().enumerate() {
-            let mut names = cycle
-                .iter()
-                .map(|id| (self.get_node_kind(id), self.get_node_name(id)));
-            let (first_kind, first_name) = names.next().unwrap();
-            writeln!(
-                message,
-                "cycle {}: {first_kind} `{first_name}` must run before itself",
-                i + 1,
-            )
-            .unwrap();
-            writeln!(message, "{first_kind} `{first_name}`").unwrap();
-            for (kind, name) in names.chain(core::iter::once((first_kind, first_name))) {
-                writeln!(message, " ... which must run before {kind} `{name}`").unwrap();
-            }
-            writeln!(message).unwrap();
         }
 
         message
@@ -1072,8 +965,8 @@ impl DefaultGraph {
         for &(a, b) in &dep_results.connected {
             if hier_results_connected.contains(&(a, b)) || hier_results_connected.contains(&(b, a))
             {
-                let name_a = self.get_node_name(&a);
-                let name_b = self.get_node_name(&b);
+                let name_a = self.node_name(a);
+                let name_b = self.node_name(b);
                 return Err(DefaultBuildError::CrossDependency(name_a, name_b));
             }
         }
@@ -1097,8 +990,8 @@ impl DefaultGraph {
 
             if !a_systems.is_disjoint(b_systems) {
                 return Err(DefaultBuildError::SetsHaveOrderButIntersect(
-                    self.get_node_name(a),
-                    self.get_node_name(b),
+                    self.node_name(*a),
+                    self.node_name(*b),
                 ));
             }
         }
@@ -1120,7 +1013,7 @@ impl DefaultGraph {
                 let relations = before.count() + after.count() + ambiguous_with.count();
                 if instances > 1 && relations > 0 {
                     return Err(DefaultBuildError::SystemTypeSetAmbiguity(
-                        self.get_node_name(&id),
+                        self.node_name(id),
                     ));
                 }
             }
@@ -1185,9 +1078,9 @@ impl DefaultGraph {
     ) -> impl Iterator<Item = (String, String, Vec<&'a str>)> + 'a {
         ambiguities
             .iter()
-            .map(move |(system_a, system_b, conflicts)| {
-                let name_a = self.get_node_name(system_a);
-                let name_b = self.get_node_name(system_b);
+            .map(move |&(system_a, system_b, ref conflicts)| {
+                let name_a = self.node_name(system_a);
+                let name_b = self.node_name(system_b);
 
                 debug_assert!(system_a.is_system(), "{name_a} is not a system.");
                 debug_assert!(system_b.is_system(), "{name_b} is not a system.");
@@ -1216,7 +1109,7 @@ impl DefaultGraph {
         });
         let mut sets: Vec<_> = sets
             .into_iter()
-            .map(|set_id| self.get_node_name(&set_id))
+            .map(|set_id| self.node_name(set_id))
             .collect();
         sets.sort();
         sets
@@ -1267,6 +1160,10 @@ impl ScheduleGraph for DefaultGraph {
             self.remove_build_pass::<AutoInsertApplyDeferredPass>();
         }
         self.settings = settings;
+    }
+
+    fn node_name(&self, node: Self::Id) -> String {
+        self.get_node_name_inner(&node, self.settings.report_sets)
     }
 
     fn initialize(&mut self, world: &mut World) {

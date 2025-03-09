@@ -1,28 +1,32 @@
 use alloc::collections::BTreeMap;
-use core::{any::TypeId, fmt::Write as _, marker::PhantomData};
-use disqualified::ShortName;
-use fixedbitset::FixedBitSet;
+use core::{
+    any::TypeId,
+    fmt::Write as _,
+    ops::{Deref, DerefMut},
+};
 
 use bevy_ecs::{
     component::Tick,
+    entity::Entity,
     result::Result,
     schedule::{
         default::{DenselyChained, LogLevel},
-        graph::{
-            check_graph, simple_cycles_in_component, CheckGraphResults, Dag, DiGraph, Direction,
-        },
-        traits::{GraphNode, ProcessedConfigs, ScheduleExecutable, ScheduleGraph},
+        graph::{check_graph, toposort_graph, CheckGraphResults, Dag, DiGraph, Direction},
+        traits::{GraphNode, GraphNodeId, ProcessedConfigs, ScheduleExecutable, ScheduleGraph},
         Chain, Dependencies, Dependency, DependencyKind, Hierarchy, InternedScheduleLabel,
-        InternedSystemSet, NodeConfigs, ReportCycles, ScheduleBuildPass, ScheduleBuildPassObj,
-        ScheduleExecutor,
+        InternedSystemSet, NodeConfigs, ScheduleBuildPass, ScheduleBuildPassObj, ScheduleExecutor,
     },
     system::{BoxedReadOnlySystem, SystemInput},
     world::World,
 };
 use bevy_platform_support::collections::{HashMap, HashSet};
-use wgpu::CommandBuffer;
+use disqualified::ShortName;
+use fixedbitset::FixedBitSet;
 
-use crate::render_graph2::{node::RenderNodeId, RenderGroupMetadata, RenderNodeMetadata};
+use crate::{
+    render_graph2::{node::RenderNodeId, RenderGroupMetadata, RenderNodeMetadata},
+    renderer::RenderContext,
+};
 
 /// Metadata for a [`Schedule`].
 ///
@@ -132,103 +136,6 @@ impl RenderGraph {
         Ok(())
     }
 
-    /// Tries to topologically sort `graph`.
-    ///
-    /// If the graph is acyclic, returns [`Ok`] with the list of [`RenderNodeId`] in a valid
-    /// topological order. If the graph contains cycles, returns [`Err`] with the list of
-    /// strongly-connected components that contain cycles (also in a valid topological order).
-    ///
-    /// # Errors
-    ///
-    /// If the graph contain cycles, then an error is returned.
-    fn topsort_graph(
-        &self,
-        graph: &DiGraph<RenderNodeId>,
-        report: ReportCycles,
-    ) -> Result<Vec<RenderNodeId>, RenderGraphError> {
-        // Tarjan's SCC algorithm returns elements in *reverse* topological order.
-        let mut top_sorted_nodes = Vec::with_capacity(graph.node_count());
-        let mut sccs_with_cycles = Vec::new();
-
-        for scc in graph.iter_sccs() {
-            // A strongly-connected component is a group of nodes who can all reach each other
-            // through one or more paths. If an SCC contains more than one node, there must be
-            // at least one cycle within them.
-            top_sorted_nodes.extend_from_slice(&scc);
-            if scc.len() > 1 {
-                sccs_with_cycles.push(scc);
-            }
-        }
-
-        if sccs_with_cycles.is_empty() {
-            // reverse to get topological order
-            top_sorted_nodes.reverse();
-            Ok(top_sorted_nodes)
-        } else {
-            let mut cycles = Vec::new();
-            for scc in &sccs_with_cycles {
-                cycles.append(&mut simple_cycles_in_component(graph, scc));
-            }
-
-            let error = match report {
-                ReportCycles::Hierarchy => RenderGraphError::HierarchyCycle(
-                    self.get_hierarchy_cycles_error_message(&cycles),
-                ),
-                ReportCycles::Dependency => RenderGraphError::DependencyCycle(
-                    self.get_dependency_cycles_error_message(&cycles),
-                ),
-            };
-
-            Err(error)
-        }
-    }
-
-    /// Logs details of cycles in the hierarchy graph.
-    fn get_hierarchy_cycles_error_message(&self, cycles: &[Vec<RenderNodeId>]) -> String {
-        let mut message = format!("schedule has {} in_set cycle(s):\n", cycles.len());
-        for (i, cycle) in cycles.iter().enumerate() {
-            let mut names = cycle.iter().map(|&id| self.get_node_name(id));
-            let first_name = names.next().unwrap();
-            writeln!(
-                message,
-                "cycle {}: set `{first_name}` contains itself",
-                i + 1,
-            )
-            .unwrap();
-            writeln!(message, "set `{first_name}`").unwrap();
-            for name in names.chain(core::iter::once(first_name)) {
-                writeln!(message, " ... which contains set `{name}`").unwrap();
-            }
-            writeln!(message).unwrap();
-        }
-
-        message
-    }
-
-    /// Logs details of cycles in the dependency graph.
-    fn get_dependency_cycles_error_message(&self, cycles: &[Vec<RenderNodeId>]) -> String {
-        let mut message = format!("schedule has {} before/after cycle(s):\n", cycles.len());
-        for (i, cycle) in cycles.iter().enumerate() {
-            let mut names = cycle
-                .iter()
-                .map(|&id| (id.type_name(), self.get_node_name(id)));
-            let (first_kind, first_name) = names.next().unwrap();
-            writeln!(
-                message,
-                "cycle {}: {first_kind} `{first_name}` must run before itself",
-                i + 1,
-            )
-            .unwrap();
-            writeln!(message, "{first_kind} `{first_name}`").unwrap();
-            for (kind, name) in names.chain(core::iter::once((first_kind, first_name))) {
-                writeln!(message, " ... which must run before {kind} `{name}`").unwrap();
-            }
-            writeln!(message).unwrap();
-        }
-
-        message
-    }
-
     pub(super) fn process_configs<N>(
         &mut self,
         configs: NodeConfigs<N, Self>,
@@ -336,8 +243,8 @@ impl RenderGraph {
         schedule_label: InternedScheduleLabel,
     ) -> Result<RenderGraphExecutable, RenderGraphError> {
         // Check hierarchy for cycles
-        self.hierarchy.topsort =
-            self.topsort_graph(&self.hierarchy.graph, ReportCycles::Hierarchy)?;
+        self.hierarchy.topsort = toposort_graph(&self.hierarchy.graph)
+            .map_err(|e| RenderGraphError::HierarchyCycle(e.hierarchy_cycle(self)))?;
 
         let hier_results = check_graph(&self.hierarchy.graph, &self.hierarchy.topsort);
         self.optionally_check_hierarchy_conflicts(&hier_results.transitive_edges, schedule_label)?;
@@ -346,8 +253,8 @@ impl RenderGraph {
         self.hierarchy.graph = hier_results.transitive_reduction;
 
         // Check dependencies for cycles
-        self.dependency.topsort =
-            self.topsort_graph(&self.dependency.graph, ReportCycles::Dependency)?;
+        self.dependency.topsort = toposort_graph(&self.dependency.graph)
+            .map_err(|e| RenderGraphError::DependencyCycle(e.dependency_cycle(self)))?;
 
         // Check for systems or system sets depending on sets they belong to
         let dep_results = check_graph(&self.dependency.graph, &self.dependency.topsort);
@@ -372,7 +279,8 @@ impl RenderGraph {
 
         // topsort
         let mut dependency_flattened_dag = Dag {
-            topsort: self.topsort_graph(&dependency_flattened, ReportCycles::Dependency)?,
+            topsort: toposort_graph(&dependency_flattened)
+                .map_err(|e| RenderGraphError::DependencyCycle(e.dependency_cycle(self)))?,
             graph: dependency_flattened,
         };
 
@@ -601,7 +509,7 @@ impl RenderGraph {
     fn names_of_sets_containing_node(&self, id: RenderNodeId) -> Vec<String> {
         let mut sets = <HashSet<_>>::default();
         self.traverse_sets_containing_node(id, &mut |set_id| {
-            !self.system_sets[set_id.index()].system_type().is_some() && sets.insert(set_id)
+            self.system_sets[set_id.index()].system_type().is_none() && sets.insert(set_id)
         });
         let mut sets: Vec<_> = sets
             .into_iter()
@@ -657,7 +565,7 @@ impl RenderGraph {
             writeln!(
                 message,
                 " -- {} `{}` cannot be child of set `{}`, longer path exists",
-                child.type_name(),
+                child.kind(),
                 self.get_node_name(child),
                 self.get_node_name(parent),
             )
@@ -721,6 +629,10 @@ impl ScheduleGraph for RenderGraph {
         self.settings = settings;
     }
 
+    fn node_name(&self, node: Self::Id) -> String {
+        self.get_node_name_inner(node, self.settings.report_sets)
+    }
+
     fn initialize(&mut self, world: &mut World) {
         for sys_idx in self.uninit.drain(..) {
             self.systems[sys_idx].get_mut().unwrap().initialize(world);
@@ -733,7 +645,7 @@ impl ScheduleGraph for RenderGraph {
         executable: &mut Self::Executable,
         (): &Self::GlobalMetadata,
         label: InternedScheduleLabel,
-    ) -> std::result::Result<(), Self::BuildError> {
+    ) -> Result<(), Self::BuildError> {
         if !self.uninit.is_empty() {
             return Err(RenderGraphError::Uninitialized);
         }
@@ -833,7 +745,7 @@ pub enum RenderGraphError {
     Uninitialized,
 }
 
-pub type RenderSystem = BoxedReadOnlySystem<RenderCtx<'static>, Result<CommandBuffer>>;
+pub type RenderSystem = BoxedReadOnlySystem<RenderNodeContext<'static>, Result>;
 
 pub struct RenderNode {
     inner: Option<RenderSystem>,
@@ -858,15 +770,44 @@ impl RenderNode {
     }
 }
 
-pub struct RenderCtx<'a> {
-    _marker: PhantomData<&'a ()>,
+pub struct RenderNodeContext<'w> {
+    context: &'w mut RenderContext<'w>,
+    view_entity: Option<Entity>,
 }
 
-impl SystemInput for RenderCtx<'_> {
-    type Param<'i> = RenderCtx<'i>;
-    type Inner<'i> = RenderCtx<'i>;
+impl RenderNodeContext<'_> {
+    pub fn view_entity(&self) -> Entity {
+        self.view_entity.expect("view entity not set")
+    }
+
+    pub fn get_view_entity(&self) -> Option<Entity> {
+        self.view_entity
+    }
+
+    pub fn set_view_entity(&mut self, entity: Entity) {
+        self.view_entity = Some(entity);
+    }
+}
+
+impl SystemInput for RenderNodeContext<'_> {
+    type Param<'i> = RenderNodeContext<'i>;
+    type Inner<'i> = RenderNodeContext<'i>;
 
     fn wrap(this: Self::Inner<'_>) -> Self::Param<'_> {
         this
+    }
+}
+
+impl<'w> Deref for RenderNodeContext<'w> {
+    type Target = RenderContext<'w>;
+
+    fn deref(&self) -> &Self::Target {
+        self.context
+    }
+}
+
+impl<'w> DerefMut for RenderNodeContext<'w> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.context
     }
 }

@@ -1,11 +1,12 @@
-use alloc::{vec, vec::Vec};
-use smallvec::SmallVec;
+use alloc::{format, string::String, vec, vec::Vec};
+use core::fmt::Write as _;
 
 use bevy_platform_support::collections::{HashMap, HashSet};
-
 use fixedbitset::FixedBitSet;
+use smallvec::SmallVec;
+use thiserror::Error;
 
-use crate::schedule::traits::GraphNodeId;
+use crate::schedule::traits::{GraphNodeId, ScheduleGraph};
 
 mod graph_map;
 mod tarjan_scc;
@@ -293,4 +294,95 @@ pub fn simple_cycles_in_component<Id: GraphNodeId>(
     }
 
     cycles
+}
+
+/// Tries to topologically sort `graph`.
+///
+/// If the graph is acyclic, returns [`Ok`] with the list of [`GraphNodeId`] in a valid
+/// topological order. If the graph contains cycles, returns [`Err`] with the list of
+/// strongly-connected components that contain cycles (also in a valid topological order).
+///
+/// # Errors
+///
+/// If the graph contain cycles, then an error is returned.
+pub fn toposort_graph<Id: GraphNodeId>(
+    graph: &DiGraph<Id>,
+) -> Result<Vec<Id>, GraphCycleError<Id>> {
+    // Tarjan's SCC algorithm returns elements in *reverse* topological order.
+    let mut top_sorted_nodes = Vec::with_capacity(graph.node_count());
+    let mut sccs_with_cycles = Vec::new();
+
+    for scc in graph.iter_sccs() {
+        // A strongly-connected component is a group of nodes who can all reach each other
+        // through one or more paths. If an SCC contains more than one node, there must be
+        // at least one cycle within them.
+        top_sorted_nodes.extend_from_slice(&scc);
+        if scc.len() > 1 {
+            sccs_with_cycles.push(scc);
+        }
+    }
+
+    if sccs_with_cycles.is_empty() {
+        // reverse to get topological order
+        top_sorted_nodes.reverse();
+        Ok(top_sorted_nodes)
+    } else {
+        let mut cycles = Vec::new();
+        for scc in &sccs_with_cycles {
+            cycles.append(&mut simple_cycles_in_component(graph, scc));
+        }
+
+        Err(GraphCycleError(cycles))
+    }
+}
+
+/// Error type returned by [`toposort_graph`].
+#[derive(Error, Debug)]
+#[error("{0}")]
+pub struct GraphCycleError<Id: GraphNodeId>(pub Vec<Vec<Id>>);
+
+impl<Id: GraphNodeId> GraphCycleError<Id> {
+    /// Converts the error into a string message about hierarchy cycles.
+    pub fn hierarchy_cycle<G: ScheduleGraph<Id = Id>>(self, graph: &G) -> String {
+        let mut message = format!("schedule has {} in_set cycle(s):\n", self.0.len());
+        for (i, cycle) in self.0.into_iter().enumerate() {
+            let mut names = cycle.into_iter().map(|id| graph.node_name(id));
+            let first_name = names.next().unwrap();
+            writeln!(
+                message,
+                "cycle {}: set `{first_name}` contains itself",
+                i + 1,
+            )
+            .unwrap();
+            writeln!(message, "set `{first_name}`").unwrap();
+            for name in names.chain(core::iter::once(first_name)) {
+                writeln!(message, " ... which contains set `{name}`").unwrap();
+            }
+            writeln!(message).unwrap();
+        }
+
+        message
+    }
+
+    /// Converts the error into a string message about dependency cycles.
+    pub fn dependency_cycle<G: ScheduleGraph<Id = Id>>(self, graph: &G) -> String {
+        let mut message = format!("schedule has {} before/after cycle(s):\n", self.0.len());
+        for (i, cycle) in self.0.into_iter().enumerate() {
+            let mut names = cycle.into_iter().map(|id| (id.kind(), graph.node_name(id)));
+            let (first_kind, first_name) = names.next().unwrap();
+            writeln!(
+                message,
+                "cycle {}: {first_kind} `{first_name}` must run before itself",
+                i + 1,
+            )
+            .unwrap();
+            writeln!(message, "{first_kind} `{first_name}`").unwrap();
+            for (kind, name) in names.chain(core::iter::once((first_kind, first_name))) {
+                writeln!(message, " ... which must run before {kind} `{name}`").unwrap();
+            }
+            writeln!(message).unwrap();
+        }
+
+        message
+    }
 }

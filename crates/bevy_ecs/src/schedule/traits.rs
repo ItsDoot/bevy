@@ -1,6 +1,6 @@
 //! Traits used to define custom schedule graphs.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use bevy_platform_support::{collections::HashSet, hash::FixedHasher};
 use core::{error::Error, fmt::Debug, hash::Hash};
 use fixedbitset::FixedBitSet;
@@ -8,9 +8,10 @@ use fixedbitset::FixedBitSet;
 use crate::{
     component::Tick,
     schedule::{
-        graph::Direction, Dependencies, Hierarchy, InternedScheduleLabel, NodeConfig, NodeConfigs,
-        ScheduleBuildPass, ScheduleExecutor,
+        graph::Direction, BoxedCondition, ConditionalGraphNode, Dependencies, Hierarchy,
+        InternedScheduleLabel, NodeConfig, NodeConfigs, ScheduleBuildPass, ScheduleExecutor,
     },
+    system::SystemInput,
     world::World,
 };
 
@@ -56,6 +57,9 @@ pub trait ScheduleGraph: Default {
 
     /// Sets the graph's build settings.
     fn set_build_settings(&mut self, settings: Self::BuildSettings);
+
+    /// Returns the name of the node with the given identifier.
+    fn node_name(&self, node: Self::Id) -> String;
 
     /// Initializes all nodes in the graph for the given world.
     fn initialize(&mut self, world: &mut World);
@@ -145,6 +149,11 @@ pub trait GraphNodeId: Copy + Eq + Ord + Hash + Debug + 'static {
     type Directed: DirectedGraphNodeId<Self>;
     /// The storage type for a set of identifiers.
     type Set: GraphNodeIdSet<Self>;
+
+    /// Returns the kind of identifier.
+    ///
+    /// If the identifier is an enum, its recommended to return the variant name.
+    fn kind(&self) -> &'static str;
 }
 
 /// Trait for types that hold a pair of [`GraphNodeId`]s. Typically stored in a
@@ -260,6 +269,73 @@ impl<Id: GraphNodeId> GraphNodeIdSet<Id> for HashSet<Id> {
     }
 }
 
+/// Trait for types that store [`GraphNode`]s.
+pub trait NodeContainer<N, G>
+where
+    N: GraphNode<G>,
+    G: ScheduleGraph,
+{
+    /// Returns the node with the given identifier, if it exists.
+    fn get_node(&self, id: G::Id) -> Option<&N>;
+
+    /// Returns a mutable reference to the node with the given identifier, if it exists.
+    fn get_node_mut(&mut self, id: G::Id) -> Option<&mut N>;
+
+    /// Returns the node with the given identifier.
+    ///
+    /// # Panics
+    ///
+    /// If the node does not exist.
+    fn node(&self, id: G::Id) -> &N {
+        self.get_node(id)
+            .unwrap_or_else(|| panic!("Node {id:?} not found"))
+    }
+
+    /// Returns a mutable reference to the node with the given identifier.
+    ///
+    /// # Panics
+    ///
+    /// If the node does not exist.
+    fn node_mut(&mut self, id: G::Id) -> &mut N {
+        self.get_node_mut(id)
+            .unwrap_or_else(|| panic!("Node {id:?} not found"))
+    }
+
+    /// Returns an iterator over the nodes.
+    fn iter<'a>(&'a self) -> impl Iterator<Item = (G::Id, &'a N)> + 'a
+    where
+        N: 'a;
+}
+
+/// Trait for types that store [`GraphNode`]s with conditions.
+pub trait NodeConditionContainer<N, G, In = ()>: NodeContainer<N, G>
+where
+    N: ConditionalGraphNode<G, In>,
+    G: ScheduleGraph,
+    In: SystemInput,
+{
+    /// Returns the conditions for the node with the given identifier, if they exist.
+    fn get_conditions(&self, id: G::Id) -> Option<&[BoxedCondition<In>]>;
+
+    /// Returns the conditions for the node with the given identifier.
+    ///
+    /// # Panics
+    ///
+    /// If the node does not exist.
+    fn conditions(&self, id: G::Id) -> &[BoxedCondition<In>] {
+        self.get_conditions(id)
+            .unwrap_or_else(|| panic!("Conditions for node {id:?} not found"))
+    }
+
+    /// Returns an iterator over the nodes with their conditions.
+    fn iter_with_conditions<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (G::Id, &'a N, &'a [BoxedCondition<In>])> + 'a
+    where
+        N: 'a,
+        In: 'a;
+}
+
 /// [`ScheduleGraph`] specialization for graphs that have [`GraphNode`]s with
 /// [`Hierarchy`] information.
 pub trait HierarchicalScheduleGraph<T>: ScheduleGraph {
@@ -267,7 +343,7 @@ pub trait HierarchicalScheduleGraph<T>: ScheduleGraph {
     fn add_hierarchy(
         &mut self,
         target: Self::Id,
-        hierarchy: Hierarchy<T>,
+        hierarchy: &Hierarchy<T>,
     ) -> Result<(), Self::BuildError>;
 }
 

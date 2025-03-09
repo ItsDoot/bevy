@@ -5,13 +5,13 @@ use bevy_ecs::schedule::{
     FallibleReadOnlySystem, Hierarchy, InternedSystemSet, NodeConfig, NodeConfigs,
 };
 use fixedbitset::FixedBitSet;
-use wgpu::CommandBuffer;
 
 use crate::render_graph2::{
-    RenderCtx, RenderGraph, RenderGraphError, RenderGroupMetadata, RenderNode, RenderNodeMetadata,
+    RenderGraph, RenderGraphError, RenderGroupMetadata, RenderNode, RenderNodeContext,
+    RenderNodeMetadata,
 };
 
-pub type FallibleRenderSystem = FallibleReadOnlySystem<RenderCtx<'static>, CommandBuffer>;
+pub type FallibleRenderSystem = FallibleReadOnlySystem<RenderNodeContext<'static>>;
 
 impl GraphNode<RenderGraph> for FallibleRenderSystem {
     type Metadata = RenderNodeMetadata;
@@ -111,14 +111,6 @@ impl RenderNodeId {
     pub const fn is_set(&self) -> bool {
         matches!(self, RenderNodeId::Set(_))
     }
-
-    /// Returns the name for the type of node.
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            RenderNodeId::System(_) => "system",
-            RenderNodeId::Set(_) => "system set",
-        }
-    }
 }
 
 impl From<RenderNodeId> for usize {
@@ -131,4 +123,11 @@ impl GraphNodeId for RenderNodeId {
     type Pair = (Self, Self);
     type Directed = (Self, Direction);
     type Set = FixedBitSet;
+
+    fn kind(&self) -> &'static str {
+        match self {
+            RenderNodeId::System(_) => "system",
+            RenderNodeId::Set(_) => "system set",
+        }
+    }
 }

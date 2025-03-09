@@ -3,12 +3,11 @@ use alloc::{boxed::Box, collections::BTreeSet, vec::Vec};
 use bevy_platform_support::collections::HashMap;
 
 use crate::schedule::default::{DefaultBuildError, DefaultGraph, SystemNode};
+use crate::schedule::graph::toposort_graph;
 use crate::world::World;
 use crate::{schedule::default::NodeId, system::IntoSystem};
 
-use super::{
-    is_apply_deferred, ApplyDeferred, DiGraph, Direction, ReportCycles, ScheduleBuildPass,
-};
+use super::{is_apply_deferred, ApplyDeferred, DiGraph, Direction, ScheduleBuildPass};
 
 /// A [`ScheduleBuildPass`] that inserts [`ApplyDeferred`] systems into the schedule graph
 /// when there are [`Deferred`](crate::prelude::Deferred)
@@ -78,7 +77,8 @@ impl ScheduleBuildPass<DefaultGraph> for AutoInsertApplyDeferredPass {
         dependency_flattened: &mut DiGraph<NodeId>,
     ) -> Result<(), DefaultBuildError> {
         let mut sync_point_graph = dependency_flattened.clone();
-        let topo = graph.topsort_graph(dependency_flattened, ReportCycles::Dependency)?;
+        let topo = toposort_graph(dependency_flattened)
+            .map_err(|e| DefaultBuildError::DependencyCycle(e.dependency_cycle(graph)))?;
 
         fn set_has_conditions(graph: &DefaultGraph, node: NodeId) -> bool {
             !graph.set_conditions_at(node).is_empty()

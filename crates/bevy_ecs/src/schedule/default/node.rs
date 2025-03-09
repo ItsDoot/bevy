@@ -153,6 +153,13 @@ impl GraphNodeId for NodeId {
     type Pair = CompactNodeIdPair;
     type Directed = CompactNodeIdAndDirection;
     type Set = FixedBitSet;
+
+    fn kind(&self) -> &'static str {
+        match self {
+            NodeId::System(_) => "system",
+            NodeId::Set(_) => "system set",
+        }
+    }
 }
 
 /// Compact storage of a [`NodeId`] and a [`Direction`].

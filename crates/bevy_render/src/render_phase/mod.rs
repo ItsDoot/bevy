@@ -31,7 +31,12 @@ mod rangefinder;
 use bevy_app::{App, Plugin};
 use bevy_derive::{Deref, DerefMut};
 use bevy_ecs::component::Tick;
-use bevy_ecs::entity::EntityHash;
+use bevy_ecs::entity::{Entity, EntityHash};
+use bevy_ecs::resource::Resource;
+use bevy_ecs::schedule::common_conditions::resource_exists;
+use bevy_ecs::schedule::{IntoConditionalNodeConfigs, IntoHierarchicalNodeConfigs};
+use bevy_ecs::system::ResMut;
+use bevy_ecs::world::World;
 use bevy_platform_support::collections::{hash_map::Entry, HashMap};
 use bevy_utils::default;
 pub use draw::*;
@@ -61,10 +66,7 @@ use crate::{
     render_resource::{CachedRenderPipelineId, GpuArrayBufferIndex, PipelineCache},
     Render, RenderApp, RenderSet,
 };
-use bevy_ecs::{
-    prelude::*,
-    system::{lifetimeless::SRes, SystemParamItem},
-};
+use bevy_ecs::system::{lifetimeless::SRes, SystemParamItem};
 use core::{fmt::Debug, hash::Hash, iter, marker::PhantomData, ops::Range, slice::SliceIndex};
 use smallvec::SmallVec;
 

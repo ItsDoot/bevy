@@ -32,7 +32,7 @@ impl<N: GraphNode<G>, G: ScheduleGraph> NodeConfigs<N, G> {
     pub fn distributive_run_if_inner<In, M>(&mut self, condition: impl Condition<M, In> + Clone)
     where
         In: SystemInput,
-        N::Metadata: AsMut<Conditions<In>>,
+        N: ConditionalGraphNode<G, In>,
     {
         match self {
             Self::Single(config) => {
@@ -53,8 +53,7 @@ impl<N: GraphNode<G>, G: ScheduleGraph> NodeConfigs<N, G> {
     pub fn run_if_dyn<In>(&mut self, condition: BoxedCondition<In>)
     where
         In: SystemInput,
-        N::Metadata: AsMut<Conditions<In>>,
-        N::GroupMetadata: AsMut<Conditions<In>>,
+        N: ConditionalGraphNode<G, In>,
     {
         match self {
             Self::Single(config) => {
@@ -70,7 +69,7 @@ impl<N: GraphNode<G>, G: ScheduleGraph> NodeConfigs<N, G> {
 /// [`GraphNode`]s that can be configured to run conditionally.
 pub trait IntoConditionalNodeConfigs<N, G, Marker, In = ()>: IntoNodeConfigs<N, G, Marker>
 where
-    N: GraphNode<G, Metadata: AsMut<Conditions<In>>, GroupMetadata: AsMut<Conditions<In>>>,
+    N: ConditionalGraphNode<G, In>,
     G: ScheduleGraph,
     In: SystemInput,
 {
@@ -149,7 +148,7 @@ where
 
 impl<N, G, M, In, I> IntoConditionalNodeConfigs<N, G, M, In> for I
 where
-    N: GraphNode<G, Metadata: AsMut<Conditions<In>>, GroupMetadata: AsMut<Conditions<In>>>,
+    N: ConditionalGraphNode<G, In>,
     G: ScheduleGraph,
     In: SystemInput,
     I: IntoNodeConfigs<N, G, M>,
@@ -165,4 +164,17 @@ fn new_condition<In: SystemInput, M>(condition: impl Condition<M, In>) -> BoxedC
     );
 
     Box::new(condition_system)
+}
+
+/// Shorthand for [`GraphNode`]s that can be configured to run conditionally.
+pub trait ConditionalGraphNode<G: ScheduleGraph, In: SystemInput = ()>:
+    GraphNode<G, Metadata: AsMut<Conditions<In>>, GroupMetadata: AsMut<Conditions<In>>>
+{
+}
+
+impl<N, G> ConditionalGraphNode<G> for N
+where
+    N: GraphNode<G, Metadata: AsMut<Conditions<()>>, GroupMetadata: AsMut<Conditions<()>>>,
+    G: ScheduleGraph,
+{
 }
