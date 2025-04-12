@@ -1240,11 +1240,11 @@ impl<'w> EntityWorldMut<'w> {
     ///
     ///  The above is trivially satisfied if `location` was sourced from `world.entities().get(entity)`.
     #[inline]
-    pub(crate) unsafe fn new(
-        world: &'w mut World,
-        entity: Entity,
-        location: EntityLocation,
-    ) -> Self {
+    pub(crate) unsafe fn new(cell: UnsafeEntityCell<'w>) -> Self {
+        let world = cell.world().world_mut();
+        let entity = cell.entity();
+        let location = cell.location();
+
         debug_assert!(world.entities().contains(entity));
         debug_assert_eq!(world.entities().get(entity), Some(location));
 

@@ -1186,8 +1186,9 @@ impl World {
         self.entities
             .set_spawned_or_despawned_by(entity.index(), caller);
 
+        let ecell = UnsafeEntityCell::new(self.as_unsafe_world_cell(), entity, entity_location);
         // SAFETY: entity and location are valid, as they were just created above
-        let mut entity = unsafe { EntityWorldMut::new(self, entity, entity_location) };
+        let mut entity = unsafe { EntityWorldMut::new(ecell) };
         after_effect.apply(&mut entity);
         entity
     }
@@ -1210,7 +1211,8 @@ impl World {
         self.entities
             .set_spawned_or_despawned_by(entity.index(), caller);
 
-        EntityWorldMut::new(self, entity, location)
+        let ecell = UnsafeEntityCell::new(self.as_unsafe_world_cell(), entity, location);
+        EntityWorldMut::new(ecell)
     }
 
     /// Spawns a batch of entities with the same component [`Bundle`] type. Takes a given
