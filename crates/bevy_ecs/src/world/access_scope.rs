@@ -68,6 +68,28 @@ unsafe impl<S: AccessScope> AccessScope for &S {
     }
 }
 
+/// An [`AccessScope`] that allows reading and writing to the entire world, but
+/// usually to a specific entity.
+#[derive(Clone, Copy)]
+pub struct Global;
+
+// SAFETY: `as_ref` refers to the same set of components as `Self`
+unsafe impl AccessScope for Global {
+    type AsRef<'a> = Global;
+
+    fn as_ref(&self) -> Self::AsRef<'_> {
+        *self
+    }
+
+    fn can_read(&self, _: &Components, _: ComponentId) -> bool {
+        true
+    }
+
+    fn can_write(&self, _: &Components, _: ComponentId) -> bool {
+        true
+    }
+}
+
 /// An [`AccessScope`] that allows reading and writing all components.
 #[derive(Clone, Copy)]
 pub struct Full;
