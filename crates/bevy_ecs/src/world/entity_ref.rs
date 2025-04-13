@@ -1099,10 +1099,10 @@ impl<'w> EntityWorldMut<'w> {
     fn panic_despawned(&self) -> ! {
         panic!(
             "Entity {} {}",
-            self.entity,
-            self.world
+            self.id(),
+            self.world()
                 .entities()
-                .entity_does_not_exist_error_details(self.entity)
+                .entity_does_not_exist_error_details(self.id())
         );
     }
 
@@ -1389,14 +1389,12 @@ impl<'w> EntityWorldMut<'w> {
     pub fn modify_component<T: Component, R>(&mut self, f: impl FnOnce(&mut T) -> R) -> Option<R> {
         self.assert_not_despawned();
 
-        let result = self
-            .world
-            .modify_component(self.entity, f)
-            .expect("entity access must be valid")?;
-
-        self.update_location();
-
-        Some(result)
+        let entity = self.id();
+        self.world_scope(|world| {
+            world
+                .modify_component(entity, f)
+                .expect("entity access must be valid")
+        })
     }
 
     /// Temporarily removes a [`Component`] `T` from this [`Entity`] and runs the
@@ -1421,14 +1419,12 @@ impl<'w> EntityWorldMut<'w> {
     ) -> Option<R> {
         self.assert_not_despawned();
 
-        let result = self
-            .world
-            .modify_component_by_id(self.entity, component_id, f)
-            .expect("entity access must be valid")?;
-
-        self.update_location();
-
-        Some(result)
+        let entity = self.id();
+        self.world_scope(|world| {
+            world
+                .modify_component_by_id(entity, component_id, f)
+                .expect("entity access must be valid")
+        })
     }
 
     /// Gets mutable access to the component of type `T` for the current entity.
@@ -2761,9 +2757,11 @@ impl<'w> EntityWorldMut<'w> {
     /// If the entity has been despawned while this `EntityWorldMut` is still alive.
     pub fn trigger(&mut self, event: impl Event) -> &mut Self {
         self.assert_not_despawned();
-        self.world.trigger_targets(event, self.entity);
-        self.world.flush();
-        self.update_location();
+        let entity = self.id();
+        self.world_scope(|world| {
+            world.trigger_targets(event, entity);
+            world.flush();
+        });
         self
     }
 
@@ -2787,10 +2785,11 @@ impl<'w> EntityWorldMut<'w> {
         caller: MaybeLocation,
     ) -> &mut Self {
         self.assert_not_despawned();
-        self.world
-            .spawn_with_caller(Observer::new(observer).with_entity(self.entity), caller);
-        self.world.flush();
-        self.update_location();
+        let entity = self.id();
+        self.world_scope(|world| {
+            world.spawn_with_caller(Observer::new(observer).with_entity(entity), caller);
+            world.flush();
+        });
         self
     }
 
@@ -2830,12 +2829,14 @@ impl<'w> EntityWorldMut<'w> {
     ) -> &mut Self {
         self.assert_not_despawned();
 
-        let mut builder = EntityCloner::build(self.world);
-        config(&mut builder);
-        builder.clone_entity(self.entity, target);
+        let entity = self.id();
+        self.world_scope(|world| {
+            let mut builder = EntityCloner::build(world);
+            config(&mut builder);
+            builder.clone_entity(entity, target);
 
-        self.world.flush();
-        self.update_location();
+            world.flush();
+        });
         self
     }
 
@@ -2887,16 +2888,18 @@ impl<'w> EntityWorldMut<'w> {
     ) -> Entity {
         self.assert_not_despawned();
 
-        let entity_clone = self.world.entities.reserve_entity();
-        self.world.flush();
+        let entity = self.id();
+        self.world_scope(|world| {
+            let entity_clone = world.entities.reserve_entity();
+            world.flush();
 
-        let mut builder = EntityCloner::build(self.world);
-        config(&mut builder);
-        builder.clone_entity(self.entity, entity_clone);
+            let mut builder = EntityCloner::build(world);
+            config(&mut builder);
+            builder.clone_entity(entity, entity_clone);
 
-        self.world.flush();
-        self.update_location();
-        entity_clone
+            world.flush();
+            entity_clone
+        })
     }
 
     /// Clones the specified components of this entity and inserts them into another entity.
@@ -2911,13 +2914,13 @@ impl<'w> EntityWorldMut<'w> {
     pub fn clone_components<B: Bundle>(&mut self, target: Entity) -> &mut Self {
         self.assert_not_despawned();
 
-        EntityCloner::build(self.world)
-            .deny_all()
-            .allow::<B>()
-            .clone_entity(self.entity, target);
-
-        self.world.flush();
-        self.update_location();
+        let entity = self.id();
+        self.world_scope(|world| {
+            EntityCloner::build(world)
+                .deny_all()
+                .allow::<B>()
+                .clone_entity(entity, target);
+        });
         self
     }
 
@@ -2934,14 +2937,15 @@ impl<'w> EntityWorldMut<'w> {
     pub fn move_components<B: Bundle>(&mut self, target: Entity) -> &mut Self {
         self.assert_not_despawned();
 
-        EntityCloner::build(self.world)
-            .deny_all()
-            .allow::<B>()
-            .move_components(true)
-            .clone_entity(self.entity, target);
-
-        self.world.flush();
-        self.update_location();
+        let entity = self.id();
+        self.world_scope(|world| {
+            EntityCloner::build(world)
+                .deny_all()
+                .allow::<B>()
+                .move_components(true)
+                .clone_entity(entity, target);
+            world.flush();
+        });
         self
     }
 
@@ -2949,7 +2953,7 @@ impl<'w> EntityWorldMut<'w> {
     pub fn spawned_by(&self) -> MaybeLocation {
         self.world()
             .entities()
-            .entity_get_spawned_or_despawned_by(self.entity)
+            .entity_get_spawned_or_despawned_by(self.id())
             .map(|location| location.unwrap())
     }
 }
