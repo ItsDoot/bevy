@@ -120,6 +120,7 @@
 //! [`Vec<P>`]: alloc::vec::Vec
 
 mod adapter_system;
+mod asynchronous;
 mod builder;
 mod combinator;
 mod commands;
