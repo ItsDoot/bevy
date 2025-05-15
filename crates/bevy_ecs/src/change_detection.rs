@@ -1583,10 +1583,8 @@ mod tests {
         // component added: 1, changed: 1
         world.spawn(C);
 
-        let mut change_detected_system = IntoSystem::into_system(change_detected);
-        let mut change_expired_system = IntoSystem::into_system(change_expired);
-        change_detected_system.initialize(&mut world);
-        change_expired_system.initialize(&mut world);
+        let mut change_detected_system = IntoSystem::into_system(change_detected, &mut world);
+        let mut change_expired_system = IntoSystem::into_system(change_expired, &mut world);
 
         // world: 1, system last ran: 0, component changed: 1
         // The spawn will be detected since it happened after the system "last ran".

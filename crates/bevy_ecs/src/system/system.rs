@@ -155,9 +155,6 @@ pub trait System: Send + Sync + 'static {
         unsafe { self.validate_param_unsafe(world_cell) }
     }
 
-    /// Initialize the system.
-    fn initialize(&mut self, _world: &mut World);
-
     /// Update the system's archetype component [`Access`].
     ///
     /// ## Note for implementers
@@ -371,8 +368,7 @@ impl RunSystemOnce for &mut World {
         T: IntoSystem<In, Out, Marker>,
         In: SystemInput,
     {
-        let mut system: T::System = IntoSystem::into_system(system);
-        system.initialize(self);
+        let mut system: T::System = IntoSystem::into_system(system, self);
         system
             .validate_param(self)
             .map_err(|err| RunSystemError::InvalidParams {

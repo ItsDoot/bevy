@@ -2,8 +2,8 @@ use alloc::{borrow::Cow, boxed::Box, format};
 use core::ops::Not;
 
 use crate::system::{
-    Adapt, AdapterSystem, CombinatorSystem, Combine, IntoSystem, ReadOnlySystem, System, SystemIn,
-    SystemInput,
+    Adapt, AdapterSystem, CombinatorSystem, Combine, IntoAdapterSystem, IntoCombinatorSystem,
+    ReadOnlySystem, System, SystemIn, SystemInput,
 };
 
 /// A type-erased run condition stored in a [`Box`].
@@ -116,11 +116,12 @@ pub trait Condition<Marker, In: SystemInput = ()>: sealed::Condition<Marker, In>
     /// Note that in this case, it's better to just use the run condition [`resource_exists_and_equals`].
     ///
     /// [`resource_exists_and_equals`]: common_conditions::resource_exists_and_equals
-    fn and<M, C: Condition<M, In>>(self, and: C) -> And<Self::System, C::System> {
-        let a = IntoSystem::into_system(self);
-        let b = IntoSystem::into_system(and);
-        let name = format!("{} && {}", a.name(), b.name());
-        CombinatorSystem::new(a, b, Cow::Owned(name))
+    fn and<M, C: Condition<M, In>>(self, and: C) -> IntoAnd<Self, C>
+    where
+        Self: Sized,
+        for<'a> In: SystemInput<Inner<'a>: Copy>,
+    {
+        IntoCombinatorSystem::new(self, and)
     }
 
     /// Returns a new run condition that only returns `false`
@@ -168,11 +169,12 @@ pub trait Condition<Marker, In: SystemInput = ()>: sealed::Condition<Marker, In>
     ///     ),
     /// );
     /// ```
-    fn nand<M, C: Condition<M, In>>(self, nand: C) -> Nand<Self::System, C::System> {
-        let a = IntoSystem::into_system(self);
-        let b = IntoSystem::into_system(nand);
-        let name = format!("!({} && {})", a.name(), b.name());
-        CombinatorSystem::new(a, b, Cow::Owned(name))
+    fn nand<M, C: Condition<M, In>>(self, nand: C) -> IntoNand<Self, C>
+    where
+        Self: Sized,
+        for<'a> In: SystemInput<Inner<'a>: Copy>,
+    {
+        IntoCombinatorSystem::new(self, nand)
     }
 
     /// Returns a new run condition that only returns `true`
@@ -220,11 +222,12 @@ pub trait Condition<Marker, In: SystemInput = ()>: sealed::Condition<Marker, In>
     ///     ),
     /// );
     /// ```
-    fn nor<M, C: Condition<M, In>>(self, nor: C) -> Nor<Self::System, C::System> {
-        let a = IntoSystem::into_system(self);
-        let b = IntoSystem::into_system(nor);
-        let name = format!("!({} || {})", a.name(), b.name());
-        CombinatorSystem::new(a, b, Cow::Owned(name))
+    fn nor<M, C: Condition<M, In>>(self, nor: C) -> IntoNor<Self, C>
+    where
+        Self: Sized,
+        for<'a> In: SystemInput<Inner<'a>: Copy>,
+    {
+        IntoCombinatorSystem::new(self, nor)
     }
 
     /// Returns a new run condition that returns `true`
@@ -267,11 +270,12 @@ pub trait Condition<Marker, In: SystemInput = ()>: sealed::Condition<Marker, In>
     /// # app.run(&mut world);
     /// # assert!(world.resource::<C>().0);
     /// ```
-    fn or<M, C: Condition<M, In>>(self, or: C) -> Or<Self::System, C::System> {
-        let a = IntoSystem::into_system(self);
-        let b = IntoSystem::into_system(or);
-        let name = format!("{} || {}", a.name(), b.name());
-        CombinatorSystem::new(a, b, Cow::Owned(name))
+    fn or<M, C: Condition<M, In>>(self, or: C) -> IntoOr<Self, C>
+    where
+        Self: Sized,
+        for<'a> In: SystemInput<Inner<'a>: Copy>,
+    {
+        IntoCombinatorSystem::new(self, or)
     }
 
     /// Returns a new run condition that only returns `true`
@@ -319,11 +323,12 @@ pub trait Condition<Marker, In: SystemInput = ()>: sealed::Condition<Marker, In>
     ///     ),
     /// );
     /// ```
-    fn xnor<M, C: Condition<M, In>>(self, xnor: C) -> Xnor<Self::System, C::System> {
-        let a = IntoSystem::into_system(self);
-        let b = IntoSystem::into_system(xnor);
-        let name = format!("!({} ^ {})", a.name(), b.name());
-        CombinatorSystem::new(a, b, Cow::Owned(name))
+    fn xnor<M, C: Condition<M, In>>(self, xnor: C) -> IntoXnor<Self, C>
+    where
+        Self: Sized,
+        for<'a> In: SystemInput<Inner<'a>: Copy>,
+    {
+        IntoCombinatorSystem::new(self, xnor)
     }
 
     /// Returns a new run condition that only returns `true`
@@ -361,11 +366,12 @@ pub trait Condition<Marker, In: SystemInput = ()>: sealed::Condition<Marker, In>
     /// );
     /// # app.run(&mut world);
     /// ```
-    fn xor<M, C: Condition<M, In>>(self, xor: C) -> Xor<Self::System, C::System> {
-        let a = IntoSystem::into_system(self);
-        let b = IntoSystem::into_system(xor);
-        let name = format!("({} ^ {})", a.name(), b.name());
-        CombinatorSystem::new(a, b, Cow::Owned(name))
+    fn xor<M, C: Condition<M, In>>(self, xor: C) -> IntoXor<Self, C>
+    where
+        Self: Sized,
+        for<'a> In: SystemInput<Inner<'a>: Copy>,
+    {
+        IntoCombinatorSystem::new(self, xor)
     }
 }
 
@@ -375,25 +381,19 @@ mod sealed {
     use crate::system::{IntoSystem, ReadOnlySystem, SystemInput};
 
     pub trait Condition<Marker, In: SystemInput>:
-        IntoSystem<In, bool, Marker, System = Self::ReadOnlySystem>
+        IntoSystem<In, bool, Marker, System: ReadOnlySystem>
     {
-        // This associated type is necessary to let the compiler
-        // know that `Self::System` is `ReadOnlySystem`.
-        type ReadOnlySystem: ReadOnlySystem<In = In, Out = bool>;
     }
 
-    impl<Marker, In: SystemInput, F> Condition<Marker, In> for F
-    where
-        F: IntoSystem<In, bool, Marker>,
-        F::System: ReadOnlySystem,
+    impl<Marker, In: SystemInput, F> Condition<Marker, In> for F where
+        F: IntoSystem<In, bool, Marker, System: ReadOnlySystem>
     {
-        type ReadOnlySystem = F::System;
     }
 }
 
 /// A collection of [run conditions](Condition) that may be useful in any bevy app.
 pub mod common_conditions {
-    use super::{Condition, NotSystem};
+    use super::Condition;
     use crate::{
         change_detection::DetectChanges,
         event::{Event, EventReader},
@@ -401,9 +401,9 @@ pub mod common_conditions {
         query::QueryFilter,
         removal_detection::RemovedComponents,
         resource::Resource,
-        system::{In, IntoSystem, Local, Res, System, SystemInput},
+        schedule::IntoNotSystem,
+        system::{In, IntoSystem, Local, Res, SystemInput},
     };
-    use alloc::format;
 
     /// A [`Condition`]-satisfying system that returns `true`
     /// on the first time the condition is run and false every time after.
@@ -974,14 +974,12 @@ pub mod common_conditions {
     /// app.run(&mut world);
     /// assert_eq!(world.resource::<Counter>().0, 0);
     /// ```
-    pub fn not<Marker, TOut, T>(condition: T) -> NotSystem<T::System>
+    pub fn not<Marker, TOut, T>(condition: T) -> IntoNotSystem<T>
     where
         TOut: core::ops::Not,
         T: IntoSystem<(), TOut, Marker>,
     {
-        let condition = IntoSystem::into_system(condition);
-        let name = format!("!{}", condition.name());
-        NotSystem::new(super::NotMarker, condition, name.into())
+        IntoNotSystem::new(super::NotMarker, condition)
     }
 
     /// Generates a [`Condition`] that returns true when the passed one changes.
@@ -1022,16 +1020,16 @@ pub mod common_conditions {
     /// app.run(&mut world);
     /// assert_eq!(world.resource::<Counter>().0, 2);
     /// ```
-    pub fn condition_changed<Marker, CIn, C>(condition: C) -> impl Condition<(), CIn>
+    pub fn condition_changed<Marker, CIn, C>(condition: C) -> impl Condition<Marker, CIn>
     where
         CIn: SystemInput,
         C: Condition<Marker, CIn>,
     {
-        IntoSystem::into_system(condition.pipe(|In(new): In<bool>, mut prev: Local<bool>| {
+        condition.pipe(|In(new): In<bool>, mut prev: Local<bool>| {
             let changed = *prev != new;
             *prev = new;
             changed
-        }))
+        })
     }
 
     /// Generates a [`Condition`] that returns true when the result of
@@ -1078,20 +1076,26 @@ pub mod common_conditions {
     /// app.run(&mut world);
     /// assert_eq!(world.resource::<Counter>().0, 2);
     /// ```
-    pub fn condition_changed_to<Marker, CIn, C>(to: bool, condition: C) -> impl Condition<(), CIn>
+    pub fn condition_changed_to<Marker, CIn, C>(
+        to: bool,
+        condition: C,
+    ) -> impl Condition<Marker, CIn>
     where
         CIn: SystemInput,
         C: Condition<Marker, CIn>,
     {
-        IntoSystem::into_system(condition.pipe(
-            move |In(new): In<bool>, mut prev: Local<bool>| -> bool {
-                let now_true = *prev != new && new == to;
-                *prev = new;
-                now_true
-            },
-        ))
+        condition.pipe(move |In(new): In<bool>, mut prev: Local<bool>| -> bool {
+            let now_true = *prev != new && new == to;
+            *prev = new;
+            now_true
+        })
     }
 }
+
+/// Invokes [`Not`] with the output of another system.
+///
+/// See [`common_conditions::not`] for examples.
+pub type IntoNotSystem<S> = IntoAdapterSystem<NotMarker, S>;
 
 /// Invokes [`Not`] with the output of another system.
 ///
@@ -1114,22 +1118,44 @@ impl<S: System<Out: Not>> Adapt<S> for NotMarker {
     ) -> Self::Out {
         !run_system(input)
     }
+
+    fn name(&self, system: &S) -> Cow<'static, str> {
+        Cow::Owned(format!("!{}", system.name()))
+    }
 }
+
+/// Combines the outputs of two systems using the `&&` operator.
+pub type IntoAnd<A, B> = IntoCombinatorSystem<AndMarker, A, B>;
 
 /// Combines the outputs of two systems using the `&&` operator.
 pub type And<A, B> = CombinatorSystem<AndMarker, A, B>;
 
 /// Combines and inverts the outputs of two systems using the `&&` and `!` operators.
-pub type Nand<A, B> = CombinatorSystem<NandMarker, A, B>;
+pub type IntoNand<A, B> = IntoCombinatorSystem<NandMarker, A, B>;
 
 /// Combines and inverts the outputs of two systems using the `&&` and `!` operators.
+pub type Nand<A, B> = CombinatorSystem<NandMarker, A, B>;
+
+/// Combines and inverts the outputs of two systems using the `||` and `!` operators.
+pub type IntoNor<A, B> = IntoCombinatorSystem<NorMarker, A, B>;
+
+/// Combines and inverts the outputs of two systems using the `||` and `!` operators.
 pub type Nor<A, B> = CombinatorSystem<NorMarker, A, B>;
+
+/// Combines the outputs of two systems using the `||` operator.
+pub type IntoOr<A, B> = IntoCombinatorSystem<OrMarker, A, B>;
 
 /// Combines the outputs of two systems using the `||` operator.
 pub type Or<A, B> = CombinatorSystem<OrMarker, A, B>;
 
 /// Combines and inverts the outputs of two systems using the `^` and `!` operators.
+pub type IntoXnor<A, B> = IntoCombinatorSystem<XnorMarker, A, B>;
+
+/// Combines and inverts the outputs of two systems using the `^` and `!` operators.
 pub type Xnor<A, B> = CombinatorSystem<XnorMarker, A, B>;
+
+/// Combines the outputs of two systems using the `^` operator.
+pub type IntoXor<A, B> = IntoCombinatorSystem<XorMarker, A, B>;
 
 /// Combines the outputs of two systems using the `^` operator.
 pub type Xor<A, B> = CombinatorSystem<XorMarker, A, B>;
@@ -1153,6 +1179,10 @@ where
     ) -> Self::Out {
         a(input) && b(input)
     }
+
+    fn name(a: &A, b: &B) -> Cow<'static, str> {
+        Cow::Owned(format!("{} && {}", a.name(), b.name()))
+    }
 }
 
 #[doc(hidden)]
@@ -1173,6 +1203,10 @@ where
         b: impl FnOnce(SystemIn<'_, B>) -> B::Out,
     ) -> Self::Out {
         !(a(input) && b(input))
+    }
+
+    fn name(a: &A, b: &B) -> Cow<'static, str> {
+        Cow::Owned(format!("!({} && {})", a.name(), b.name()))
     }
 }
 
@@ -1195,6 +1229,10 @@ where
     ) -> Self::Out {
         !(a(input) || b(input))
     }
+
+    fn name(a: &A, b: &B) -> Cow<'static, str> {
+        Cow::Owned(format!("!({} || {})", a.name(), b.name()))
+    }
 }
 
 #[doc(hidden)]
@@ -1215,6 +1253,10 @@ where
         b: impl FnOnce(SystemIn<'_, B>) -> B::Out,
     ) -> Self::Out {
         a(input) || b(input)
+    }
+
+    fn name(a: &A, b: &B) -> Cow<'static, str> {
+        Cow::Owned(format!("{} || {}", a.name(), b.name()))
     }
 }
 
@@ -1237,6 +1279,10 @@ where
     ) -> Self::Out {
         !(a(input) ^ b(input))
     }
+
+    fn name(a: &A, b: &B) -> Cow<'static, str> {
+        Cow::Owned(format!("!({} ^ {})", a.name(), b.name()))
+    }
 }
 
 #[doc(hidden)]
@@ -1258,6 +1304,20 @@ where
     ) -> Self::Out {
         a(input) ^ b(input)
     }
+
+    fn name(a: &A, b: &B) -> Cow<'static, str> {
+        Cow::Owned(format!("{} ^ {}", a.name(), b.name()))
+    }
+}
+
+pub struct IntoConditionChanged<C, T> {
+    condition: C,
+    to: T,
+}
+
+pub struct ConditionChanged<C, T> {
+    condition: C,
+    to: T,
 }
 
 #[cfg(test)]

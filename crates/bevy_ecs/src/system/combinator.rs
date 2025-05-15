@@ -1,4 +1,4 @@
-use alloc::{borrow::Cow, format, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, format, vec::Vec};
 use core::marker::PhantomData;
 
 use crate::{
@@ -104,6 +104,74 @@ pub trait Combine<A: System, B: System> {
         a: impl FnOnce(SystemIn<'_, A>) -> A::Out,
         b: impl FnOnce(SystemIn<'_, B>) -> B::Out,
     ) -> Self::Out;
+
+    fn name(a: &A, b: &B) -> Cow<'static, str>;
+}
+
+pub struct IntoCombinatorSystem<Func, A, B> {
+    _marker: PhantomData<fn() -> Func>,
+    a: A,
+    b: B,
+}
+
+impl<F, A, B> IntoCombinatorSystem<F, A, B> {
+    /// Creates a new system that combines two inner systems.
+    ///
+    /// The returned system will only be usable if `Func` implements [`Combine<A, B>`].
+    pub fn new(a: A, b: B) -> Self {
+        Self {
+            _marker: PhantomData,
+            a,
+            b,
+        }
+    }
+}
+
+impl<Func, A: Clone, B: Clone> Clone for IntoCombinatorSystem<Func, A, B> {
+    fn clone(&self) -> Self {
+        Self {
+            _marker: self._marker.clone(),
+            a: self.a.clone(),
+            b: self.b.clone(),
+        }
+    }
+}
+
+#[doc(hidden)]
+pub struct IsCombinatorSystemMarker;
+
+impl<F, A, AI, AO, AM, B, BI, BO, BM>
+    IntoSystem<
+        F::In,
+        F::Out,
+        (
+            IsCombinatorSystemMarker,
+            F,
+            A,
+            fn(AI, AM) -> AO,
+            B,
+            fn(BI, BM) -> BO,
+        ),
+    > for IntoCombinatorSystem<F, A, B>
+where
+    F: Combine<A::System, B::System> + 'static,
+    A: IntoSystem<AI, AO, AM>,
+    AI: SystemInput,
+    B: IntoSystem<BI, BO, BM>,
+    BI: SystemInput,
+{
+    type System = CombinatorSystem<F, A::System, B::System>;
+
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System {
+        Self::into_system(*self, world)
+    }
+
+    fn into_system(this: Self, world: &mut World) -> Self::System {
+        let system_a = IntoSystem::into_system(this.a, world);
+        let system_b = IntoSystem::into_system(this.b, world);
+        let name = F::name(&system_a, &system_b);
+        CombinatorSystem::new(system_a, system_b, name)
+    }
 }
 
 /// A [`System`] defined by combining two other systems.
@@ -118,17 +186,24 @@ pub struct CombinatorSystem<Func, A, B> {
     archetype_component_access: Access<ArchetypeComponentId>,
 }
 
-impl<Func, A, B> CombinatorSystem<Func, A, B> {
+impl<Func, A, B> CombinatorSystem<Func, A, B>
+where
+    A: System,
+    B: System,
+{
     /// Creates a new system that combines two inner systems.
     ///
     /// The returned system will only be usable if `Func` implements [`Combine<A, B>`].
     pub fn new(a: A, b: B, name: Cow<'static, str>) -> Self {
+        let mut component_access_set = FilteredAccessSet::default();
+        component_access_set.extend(a.component_access_set().clone());
+        component_access_set.extend(b.component_access_set().clone());
         Self {
             _marker: PhantomData,
             a,
             b,
             name,
-            component_access_set: FilteredAccessSet::default(),
+            component_access_set,
             archetype_component_access: Access::new(),
         }
     }
@@ -212,15 +287,6 @@ where
         unsafe { self.a.validate_param_unsafe(world) }
     }
 
-    fn initialize(&mut self, world: &mut World) {
-        self.a.initialize(world);
-        self.b.initialize(world);
-        self.component_access_set
-            .extend(self.a.component_access_set().clone());
-        self.component_access_set
-            .extend(self.b.component_access_set().clone());
-    }
-
     fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
         self.a.update_archetype_component_access(world);
         self.b.update_archetype_component_access(world);
@@ -263,8 +329,8 @@ where
 
 impl<Func, A, B> Clone for CombinatorSystem<Func, A, B>
 where
-    A: Clone,
-    B: Clone,
+    A: System + Clone,
+    B: System + Clone,
 {
     /// Clone the combined system. The cloned instance must be `.initialize()`d before it can run.
     fn clone(&self) -> Self {
@@ -298,9 +364,13 @@ where
 {
     type System = PipeSystem<A::System, B::System>;
 
-    fn into_system(this: Self) -> Self::System {
-        let system_a = IntoSystem::into_system(this.a);
-        let system_b = IntoSystem::into_system(this.b);
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System {
+        Self::into_system(*self, world)
+    }
+
+    fn into_system(this: Self, world: &mut World) -> Self::System {
+        let system_a = IntoSystem::into_system(this.a, world);
+        let system_b = IntoSystem::into_system(this.b, world);
         let name = format!("Pipe({}, {})", system_a.name(), system_b.name());
         PipeSystem::new(system_a, system_b, Cow::Owned(name))
     }
@@ -361,11 +431,14 @@ where
 {
     /// Creates a new system that pipes two inner systems.
     pub fn new(a: A, b: B, name: Cow<'static, str>) -> Self {
+        let mut component_access_set = FilteredAccessSet::default();
+        component_access_set.extend(a.component_access_set().clone());
+        component_access_set.extend(b.component_access_set().clone());
         Self {
             a,
             b,
             name,
-            component_access_set: FilteredAccessSet::default(),
+            component_access_set,
             archetype_component_access: Access::new(),
         }
     }
@@ -448,15 +521,6 @@ where
         unsafe { self.b.validate_param_unsafe(world) }?;
 
         Ok(())
-    }
-
-    fn initialize(&mut self, world: &mut World) {
-        self.a.initialize(world);
-        self.b.initialize(world);
-        self.component_access_set
-            .extend(self.a.component_access_set().clone());
-        self.component_access_set
-            .extend(self.b.component_access_set().clone());
     }
 
     fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {

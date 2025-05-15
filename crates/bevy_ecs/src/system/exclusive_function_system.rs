@@ -10,7 +10,7 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
-use alloc::{borrow::Cow, vec, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use core::marker::PhantomData;
 use variadics_please::all_tuples;
 
@@ -27,7 +27,7 @@ where
     F: ExclusiveSystemParamFunction<Marker>,
 {
     func: F,
-    param_state: Option<<F::Param as ExclusiveSystemParam>::State>,
+    param_state: <F::Param as ExclusiveSystemParam>::State,
     system_meta: SystemMeta,
     // NOTE: PhantomData<fn()-> T> gives this safe Send/Sync impls
     marker: PhantomData<fn() -> Marker>,
@@ -56,11 +56,17 @@ where
     F: ExclusiveSystemParamFunction<Marker>,
 {
     type System = ExclusiveFunctionSystem<Marker, F>;
-    fn into_system(func: Self) -> Self::System {
+
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System {
+        Self::into_system(*self, world)
+    }
+
+    fn into_system(func: Self, world: &mut World) -> Self::System {
+        let mut system_meta = SystemMeta::new::<F>();
         ExclusiveFunctionSystem {
             func,
-            param_state: None,
-            system_meta: SystemMeta::new::<F>(),
+            param_state: F::Param::init(world, &mut system_meta),
+            system_meta,
             marker: PhantomData,
         }
     }
@@ -127,10 +133,7 @@ where
             #[cfg(feature = "trace")]
             let _span_guard = self.system_meta.system_span.enter();
 
-            let params = F::Param::get_param(
-                self.param_state.as_mut().expect(PARAM_MESSAGE),
-                &self.system_meta,
-            );
+            let params = F::Param::get_param(&mut self.param_state, &self.system_meta);
             let out = self.func.run(world, input, params);
 
             world.flush();
@@ -161,12 +164,6 @@ where
     ) -> Result<(), SystemParamValidationError> {
         // All exclusive system params are always available.
         Ok(())
-    }
-
-    #[inline]
-    fn initialize(&mut self, world: &mut World) {
-        self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
-        self.param_state = Some(F::Param::init(world, &mut self.system_meta));
     }
 
     fn update_archetype_component_access(&mut self, _world: UnsafeWorldCell) {}
@@ -323,7 +320,8 @@ mod tests {
 
             use core::any::TypeId;
 
-            let system = IntoSystem::into_system(function);
+            let mut world = World::new();
+            let system = IntoSystem::into_system(function, &mut world);
 
             assert_eq!(
                 system.type_id(),
@@ -339,7 +337,7 @@ mod tests {
 
             assert_ne!(
                 system.type_id(),
-                IntoSystem::into_system(reference_system).type_id(),
+                IntoSystem::into_system(reference_system, &mut world).type_id(),
                 "Different systems should have different TypeIds"
             );
         }

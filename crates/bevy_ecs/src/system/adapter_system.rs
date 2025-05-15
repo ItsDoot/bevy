@@ -1,10 +1,10 @@
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 
 use super::{IntoSystem, ReadOnlySystem, System, SystemParamValidationError};
 use crate::{
     schedule::InternedSystemSet,
     system::{input::SystemInput, SystemIn},
-    world::unsafe_world_cell::UnsafeWorldCell,
+    world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 
 /// Customizes the behavior of an [`AdapterSystem`]
@@ -60,6 +60,10 @@ pub trait Adapt<S: System>: Send + Sync + 'static {
         input: <Self::In as SystemInput>::Inner<'_>,
         run_system: impl FnOnce(SystemIn<'_, S>) -> S::Out,
     ) -> Self::Out;
+
+    fn name(&self, system: &S) -> Cow<'static, str> {
+        system.name()
+    }
 }
 
 /// An [`IntoSystem`] creating an instance of [`AdapterSystem`].
@@ -88,10 +92,14 @@ where
 {
     type System = AdapterSystem<Func, S::System>;
 
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System {
+        Self::into_system(*self, world)
+    }
+
     // Required method
-    fn into_system(this: Self) -> Self::System {
-        let system = IntoSystem::into_system(this.system);
-        let name = system.name();
+    fn into_system(this: Self, world: &mut World) -> Self::System {
+        let system = IntoSystem::into_system(this.system, world);
+        let name = this.func.name(&system);
         AdapterSystem::new(this.func, system, name)
     }
 }
@@ -169,7 +177,7 @@ where
     }
 
     #[inline]
-    fn apply_deferred(&mut self, world: &mut crate::prelude::World) {
+    fn apply_deferred(&mut self, world: &mut World) {
         self.system.apply_deferred(world);
     }
 
@@ -185,10 +193,6 @@ where
     ) -> Result<(), SystemParamValidationError> {
         // SAFETY: Delegate to other `System` implementations.
         unsafe { self.system.validate_param_unsafe(world) }
-    }
-
-    fn initialize(&mut self, world: &mut crate::prelude::World) {
-        self.system.initialize(world);
     }
 
     #[inline]

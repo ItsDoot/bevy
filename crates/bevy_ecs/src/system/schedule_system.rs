@@ -1,3 +1,6 @@
+use core::marker::PhantomData;
+use std::boxed::Box;
+
 use alloc::{borrow::Cow, vec::Vec};
 
 use crate::{
@@ -17,7 +20,7 @@ pub struct InfallibleSystemWrapper<S: System<In = ()>>(S);
 impl<S: System<In = ()>> InfallibleSystemWrapper<S> {
     /// Create a new `OkWrapperSystem`
     pub fn new(system: S) -> Self {
-        Self(IntoSystem::into_system(system))
+        Self(system)
     }
 }
 
@@ -89,11 +92,6 @@ impl<S: System<In = ()>> System for InfallibleSystemWrapper<S> {
     }
 
     #[inline]
-    fn initialize(&mut self, world: &mut World) {
-        self.0.initialize(world);
-    }
-
-    #[inline]
     fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
         self.0.update_archetype_component_access(world);
     }
@@ -118,8 +116,84 @@ impl<S: System<In = ()>> System for InfallibleSystemWrapper<S> {
     }
 }
 
+pub struct IntoWithInputSystem<S, T> {
+    system: S,
+    value: T,
+}
+
+impl<S, T> IntoWithInputSystem<S, T> {
+    pub fn new(system: S, value: T) -> Self {
+        Self { system, value }
+    }
+}
+
+#[doc(hidden)]
+pub struct WithInputSystemMarker;
+
+impl<S, I, O, M, T> IntoSystem<(), O, (WithInputSystemMarker, I, M)> for IntoWithInputSystem<S, T>
+where
+    S: IntoSystem<I, O, M>,
+    I: for<'i> SystemInput<Inner<'i> = &'i mut T>,
+    T: Send + Sync + 'static,
+{
+    type System = WithInputSystem<S::System, T>;
+
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System {
+        let system = Box::new(self.system).dyn_into_system(world);
+        WithInputSystem::new(system, self.value)
+    }
+
+    fn into_system(this: Self, world: &mut World) -> Self::System
+    where
+        Self: Sized,
+    {
+        let system = IntoSystem::into_system(this.system, world);
+        WithInputSystem::new(system, this.value)
+    }
+}
+
+pub struct IntoWithInputFromWorldSystem<S, T> {
+    system: S,
+    _value: PhantomData<T>,
+}
+
+impl<S, T> IntoWithInputFromWorldSystem<S, T> {
+    pub fn new(system: S) -> Self {
+        Self {
+            system,
+            _value: PhantomData,
+        }
+    }
+}
+
+#[doc(hidden)]
+pub struct WithInputFromWorldSystemMarker;
+
+impl<S, I, O, M, T> IntoSystem<(), O, (WithInputFromWorldSystemMarker, I, M)>
+    for IntoWithInputFromWorldSystem<S, T>
+where
+    S: IntoSystem<I, O, M>,
+    I: for<'i> SystemInput<Inner<'i> = &'i mut T>,
+    T: FromWorld + Send + Sync + 'static,
+{
+    type System = WithInputSystem<S::System, T>;
+
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System {
+        let system = Box::new(self.system).dyn_into_system(world);
+        WithInputSystem::new(system, T::from_world(world))
+    }
+
+    fn into_system(this: Self, world: &mut World) -> Self::System
+    where
+        Self: Sized,
+    {
+        let system = IntoSystem::into_system(this.system, world);
+        WithInputSystem::new(system, T::from_world(world))
+    }
+}
+
 /// See [`IntoSystem::with_input`] for details.
-pub struct WithInputWrapper<S, T>
+pub struct WithInputSystem<S, T>
 where
     for<'i> S: System<In: SystemInput<Inner<'i> = &'i mut T>>,
     T: Send + Sync + 'static,
@@ -128,17 +202,14 @@ where
     value: T,
 }
 
-impl<S, T> WithInputWrapper<S, T>
+impl<S, T> WithInputSystem<S, T>
 where
     for<'i> S: System<In: SystemInput<Inner<'i> = &'i mut T>>,
     T: Send + Sync + 'static,
 {
     /// Wraps the given system with the given input value.
-    pub fn new<M>(system: impl IntoSystem<S::In, S::Out, M, System = S>, value: T) -> Self {
-        Self {
-            system: IntoSystem::into_system(system),
-            value,
-        }
+    pub fn new(system: S, value: T) -> Self {
+        Self { system, value }
     }
 
     /// Returns a reference to the input value.
@@ -152,7 +223,7 @@ where
     }
 }
 
-impl<S, T> System for WithInputWrapper<S, T>
+impl<S, T> System for WithInputSystem<S, T>
 where
     for<'i> S: System<In: SystemInput<Inner<'i> = &'i mut T>>,
     T: Send + Sync + 'static,
@@ -210,128 +281,6 @@ where
         world: UnsafeWorldCell,
     ) -> Result<(), SystemParamValidationError> {
         self.system.validate_param_unsafe(world)
-    }
-
-    fn initialize(&mut self, world: &mut World) {
-        self.system.initialize(world);
-    }
-
-    fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
-        self.system.update_archetype_component_access(world);
-    }
-
-    fn check_change_tick(&mut self, change_tick: Tick) {
-        self.system.check_change_tick(change_tick);
-    }
-
-    fn get_last_run(&self) -> Tick {
-        self.system.get_last_run()
-    }
-
-    fn set_last_run(&mut self, last_run: Tick) {
-        self.system.set_last_run(last_run);
-    }
-}
-
-/// Constructed in [`IntoSystem::with_input_from`].
-pub struct WithInputFromWrapper<S, T> {
-    system: S,
-    value: Option<T>,
-}
-
-impl<S, T> WithInputFromWrapper<S, T>
-where
-    for<'i> S: System<In: SystemInput<Inner<'i> = &'i mut T>>,
-    T: Send + Sync + 'static,
-{
-    /// Wraps the given system.
-    pub fn new<M>(system: impl IntoSystem<S::In, S::Out, M, System = S>) -> Self {
-        Self {
-            system: IntoSystem::into_system(system),
-            value: None,
-        }
-    }
-
-    /// Returns a reference to the input value, if it has been initialized.
-    pub fn value(&self) -> Option<&T> {
-        self.value.as_ref()
-    }
-
-    /// Returns a mutable reference to the input value, if it has been initialized.
-    pub fn value_mut(&mut self) -> Option<&mut T> {
-        self.value.as_mut()
-    }
-}
-
-impl<S, T> System for WithInputFromWrapper<S, T>
-where
-    for<'i> S: System<In: SystemInput<Inner<'i> = &'i mut T>>,
-    T: FromWorld + Send + Sync + 'static,
-{
-    type In = ();
-
-    type Out = S::Out;
-
-    fn name(&self) -> Cow<'static, str> {
-        self.system.name()
-    }
-
-    fn component_access(&self) -> &Access<ComponentId> {
-        self.system.component_access()
-    }
-
-    fn component_access_set(&self) -> &FilteredAccessSet<ComponentId> {
-        self.system.component_access_set()
-    }
-
-    fn archetype_component_access(&self) -> &Access<ArchetypeComponentId> {
-        self.system.archetype_component_access()
-    }
-
-    fn is_send(&self) -> bool {
-        self.system.is_send()
-    }
-
-    fn is_exclusive(&self) -> bool {
-        self.system.is_exclusive()
-    }
-
-    fn has_deferred(&self) -> bool {
-        self.system.has_deferred()
-    }
-
-    unsafe fn run_unsafe(
-        &mut self,
-        _input: SystemIn<'_, Self>,
-        world: UnsafeWorldCell,
-    ) -> Self::Out {
-        let value = self
-            .value
-            .as_mut()
-            .expect("System input value was not found. Did you forget to initialize the system before running it?");
-        self.system.run_unsafe(value, world)
-    }
-
-    fn apply_deferred(&mut self, world: &mut World) {
-        self.system.apply_deferred(world);
-    }
-
-    fn queue_deferred(&mut self, world: DeferredWorld) {
-        self.system.queue_deferred(world);
-    }
-
-    unsafe fn validate_param_unsafe(
-        &mut self,
-        world: UnsafeWorldCell,
-    ) -> Result<(), SystemParamValidationError> {
-        self.system.validate_param_unsafe(world)
-    }
-
-    fn initialize(&mut self, world: &mut World) {
-        self.system.initialize(world);
-        if self.value.is_none() {
-            self.value = Some(T::from_world(world));
-        }
     }
 
     fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {

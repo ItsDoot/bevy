@@ -228,8 +228,6 @@ impl System for ApplyDeferred {
         Ok(())
     }
 
-    fn initialize(&mut self, _world: &mut World) {}
-
     fn update_archetype_component_access(&mut self, _world: UnsafeWorldCell) {}
 
     fn check_change_tick(&mut self, _change_tick: Tick) {}

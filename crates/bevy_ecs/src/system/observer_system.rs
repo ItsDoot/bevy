@@ -43,7 +43,7 @@ pub trait IntoObserverSystem<E: 'static, B: Bundle, M, Out = Result>: Send + 'st
     type System: ObserverSystem<E, B, Out>;
 
     /// Turns this value into its corresponding [`System`].
-    fn into_system(this: Self) -> Self::System;
+    fn into_system(this: Self, world: &mut World) -> Self::System;
 }
 
 impl<E, B, M, S, Out> IntoObserverSystem<E, B, (Fallible, M), Out> for S
@@ -55,8 +55,8 @@ where
 {
     type System = S::System;
 
-    fn into_system(this: Self) -> Self::System {
-        IntoSystem::into_system(this)
+    fn into_system(this: Self, world: &mut World) -> Self::System {
+        IntoSystem::into_system(this, world)
     }
 }
 
@@ -69,8 +69,8 @@ where
 {
     type System = InfallibleObserverWrapper<E, B, S::System, ()>;
 
-    fn into_system(this: Self) -> Self::System {
-        InfallibleObserverWrapper::new(IntoSystem::into_system(this))
+    fn into_system(this: Self, world: &mut World) -> Self::System {
+        InfallibleObserverWrapper::new(IntoSystem::into_system(this, world))
     }
 }
 impl<E, B, M, S> IntoObserverSystem<E, B, (Never, M), Result> for S
@@ -81,8 +81,8 @@ where
 {
     type System = InfallibleObserverWrapper<E, B, S::System, Never>;
 
-    fn into_system(this: Self) -> Self::System {
-        InfallibleObserverWrapper::new(IntoSystem::into_system(this))
+    fn into_system(this: Self, world: &mut World) -> Self::System {
+        InfallibleObserverWrapper::new(IntoSystem::into_system(this, world))
     }
 }
 
@@ -173,11 +173,6 @@ where
         world: UnsafeWorldCell,
     ) -> Result<(), SystemParamValidationError> {
         self.observer.validate_param_unsafe(world)
-    }
-
-    #[inline]
-    fn initialize(&mut self, world: &mut World) {
-        self.observer.initialize(world);
     }
 
     #[inline]

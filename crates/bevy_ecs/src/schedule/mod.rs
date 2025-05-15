@@ -1088,7 +1088,6 @@ mod tests {
                 system_e.after(system_a),
             ));
 
-            schedule.graph_mut().initialize(&mut world);
             let _ = schedule.graph_mut().build_schedule(
                 &mut world,
                 TestSchedule.intern(),
@@ -1147,7 +1146,6 @@ mod tests {
             schedule.add_systems((resmut_system, resmut_system).run_if(|| true));
 
             let mut world = World::new();
-            schedule.graph_mut().initialize(&mut world);
             let _ = schedule.graph_mut().build_schedule(
                 &mut world,
                 TestSchedule.intern(),

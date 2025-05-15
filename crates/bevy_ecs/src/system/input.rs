@@ -307,13 +307,9 @@ mod tests {
         }
 
         let mut world = World::new();
-        let mut by_value = IntoSystem::into_system(by_value);
-        let mut by_ref = IntoSystem::into_system(by_ref);
-        let mut by_mut = IntoSystem::into_system(by_mut);
-
-        by_value.initialize(&mut world);
-        by_ref.initialize(&mut world);
-        by_mut.initialize(&mut world);
+        let mut by_value = IntoSystem::into_system(by_value, &mut world);
+        let mut by_ref = IntoSystem::into_system(by_ref, &mut world);
+        let mut by_mut = IntoSystem::into_system(by_mut, &mut world);
 
         let mut a = 12;
         let b = 24;

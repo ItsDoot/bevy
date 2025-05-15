@@ -715,8 +715,7 @@ mod tests {
             fn system(has_a: Query<Entity, With<A>>, has_a_and_b: Query<(&A, &B)>) {
                 assert_eq!(has_a_and_b.iter_many(&has_a).count(), 2);
             }
-            let mut system = IntoSystem::into_system(system);
-            system.initialize(&mut world);
+            let mut system = IntoSystem::into_system(system, &mut world);
             system.run((), &mut world);
         }
         {
@@ -726,8 +725,7 @@ mod tests {
                     b.0 = 1;
                 }
             }
-            let mut system = IntoSystem::into_system(system);
-            system.initialize(&mut world);
+            let mut system = IntoSystem::into_system(system, &mut world);
             system.run((), &mut world);
         }
         {
@@ -739,8 +737,7 @@ mod tests {
                     }
                 }
             }
-            let mut system = IntoSystem::into_system(system);
-            system.initialize(&mut world);
+            let mut system = IntoSystem::into_system(system, &mut world);
             system.run((), &mut world);
         }
     }
@@ -910,16 +907,13 @@ mod tests {
         let mut world = World::new();
 
         fn read_query(_q: Query<ReadsRData, With<A>>) {}
-        let mut read_query = IntoSystem::into_system(read_query);
-        read_query.initialize(&mut world);
+        let read_query = IntoSystem::into_system(read_query, &mut world);
 
         fn read_res(_r: Res<R>) {}
-        let mut read_res = IntoSystem::into_system(read_res);
-        read_res.initialize(&mut world);
+        let read_res = IntoSystem::into_system(read_res, &mut world);
 
         fn write_res(_r: ResMut<R>) {}
-        let mut write_res = IntoSystem::into_system(write_res);
-        write_res.initialize(&mut world);
+        let write_res = IntoSystem::into_system(write_res, &mut world);
 
         assert!(read_query
             .archetype_component_access()

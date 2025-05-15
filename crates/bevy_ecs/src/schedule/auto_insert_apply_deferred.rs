@@ -2,7 +2,6 @@ use alloc::{boxed::Box, collections::BTreeSet, vec::Vec};
 
 use bevy_platform::collections::HashMap;
 
-use crate::system::IntoSystem;
 use crate::world::World;
 
 use super::{
@@ -47,11 +46,7 @@ impl AutoInsertApplyDeferredPass {
     fn add_auto_sync(&mut self, graph: &mut ScheduleGraph) -> NodeId {
         let id = NodeId::System(graph.systems.len());
 
-        graph
-            .systems
-            .push(SystemNode::new(Box::new(IntoSystem::into_system(
-                ApplyDeferred,
-            ))));
+        graph.systems.push(SystemNode::new(Box::new(ApplyDeferred)));
         graph.system_conditions.push(Vec::new());
 
         // ignore ambiguities with auto sync points

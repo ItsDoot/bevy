@@ -11,7 +11,7 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World, WorldId},
 };
 
-use alloc::{borrow::Cow, vec, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, vec, vec::Vec};
 use core::marker::PhantomData;
 use variadics_please::all_tuples;
 
@@ -358,10 +358,10 @@ impl<Param: SystemParam> SystemState<Param> {
     ) -> FunctionSystem<Marker, F> {
         FunctionSystem {
             func,
-            state: Some(FunctionSystemState {
+            state: FunctionSystemState {
                 param: self.param_state,
                 world_id: self.world_id,
-            }),
+            },
             system_meta: self.meta,
             archetype_generation: self.archetype_generation,
             marker: PhantomData,
@@ -595,7 +595,7 @@ where
     F: SystemParamFunction<Marker>,
 {
     func: F,
-    state: Option<FunctionSystemState<F::Param>>,
+    state: FunctionSystemState<F::Param>,
     system_meta: SystemMeta,
     archetype_generation: ArchetypeGeneration,
     // NOTE: PhantomData<fn()-> T> gives this safe Send/Sync impls
@@ -614,6 +614,15 @@ struct FunctionSystemState<P: SystemParam> {
     world_id: WorldId,
 }
 
+impl<P: SystemParam<State: Clone>> Clone for FunctionSystemState<P> {
+    fn clone(&self) -> Self {
+        Self {
+            param: self.param.clone(),
+            world_id: self.world_id.clone(),
+        }
+    }
+}
+
 impl<Marker, F> FunctionSystem<Marker, F>
 where
     F: SystemParamFunction<Marker>,
@@ -630,12 +639,12 @@ where
 // De-initializes the cloned system.
 impl<Marker, F> Clone for FunctionSystem<Marker, F>
 where
-    F: SystemParamFunction<Marker> + Clone,
+    F: SystemParamFunction<Marker, Param: SystemParam<State: Clone>> + Clone,
 {
     fn clone(&self) -> Self {
         Self {
             func: self.func.clone(),
-            state: None,
+            state: self.state.clone(),
             system_meta: SystemMeta::new::<F>(),
             archetype_generation: ArchetypeGeneration::initial(),
             marker: PhantomData,
@@ -653,11 +662,20 @@ where
     F: SystemParamFunction<Marker>,
 {
     type System = FunctionSystem<Marker, F>;
-    fn into_system(func: Self) -> Self::System {
+
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System {
+        Self::into_system(*self, world)
+    }
+
+    fn into_system(func: Self, world: &mut World) -> Self::System {
+        let mut system_meta = SystemMeta::new::<F>();
         FunctionSystem {
             func,
-            state: None,
-            system_meta: SystemMeta::new::<F>(),
+            state: FunctionSystemState {
+                param: F::Param::init_state(world, &mut system_meta),
+                world_id: world.id(),
+            },
+            system_meta,
             archetype_generation: ArchetypeGeneration::initial(),
             marker: PhantomData,
         }
@@ -729,7 +747,7 @@ where
 
         let change_tick = world.increment_change_tick();
 
-        let param_state = &mut self.state.as_mut().expect(Self::ERROR_UNINITIALIZED).param;
+        let param_state = &mut self.state.param;
         // SAFETY:
         // - The caller has invoked `update_archetype_component_access`, which will panic
         //   if the world does not match.
@@ -744,13 +762,13 @@ where
 
     #[inline]
     fn apply_deferred(&mut self, world: &mut World) {
-        let param_state = &mut self.state.as_mut().expect(Self::ERROR_UNINITIALIZED).param;
+        let param_state = &mut self.state.param;
         F::Param::apply(param_state, &self.system_meta, world);
     }
 
     #[inline]
     fn queue_deferred(&mut self, world: DeferredWorld) {
-        let param_state = &mut self.state.as_mut().expect(Self::ERROR_UNINITIALIZED).param;
+        let param_state = &mut self.state.param;
         F::Param::queue(param_state, &self.system_meta, world);
     }
 
@@ -759,7 +777,7 @@ where
         &mut self,
         world: UnsafeWorldCell,
     ) -> Result<(), SystemParamValidationError> {
-        let param_state = &self.state.as_ref().expect(Self::ERROR_UNINITIALIZED).param;
+        let param_state = &self.state.param;
         // SAFETY:
         // - The caller has invoked `update_archetype_component_access`, which will panic
         //   if the world does not match.
@@ -768,25 +786,8 @@ where
         unsafe { F::Param::validate_param(param_state, &self.system_meta, world) }
     }
 
-    #[inline]
-    fn initialize(&mut self, world: &mut World) {
-        if let Some(state) = &self.state {
-            assert_eq!(
-                state.world_id,
-                world.id(),
-                "System built with a different world than the one it was added to.",
-            );
-        } else {
-            self.state = Some(FunctionSystemState {
-                param: F::Param::init_state(world, &mut self.system_meta),
-                world_id: world.id(),
-            });
-        }
-        self.system_meta.last_run = world.change_tick().relative_to(Tick::MAX);
-    }
-
     fn update_archetype_component_access(&mut self, world: UnsafeWorldCell) {
-        let state = self.state.as_mut().expect(Self::ERROR_UNINITIALIZED);
+        let state = &mut self.state;
         assert_eq!(state.world_id, world.id(), "Encountered a mismatched World. A System cannot be used with Worlds other than the one it was initialized with.");
 
         let archetypes = world.archetypes();
@@ -1009,7 +1010,8 @@ mod tests {
 
             use core::any::TypeId;
 
-            let system = IntoSystem::into_system(function);
+            let mut world = World::new();
+            let system = IntoSystem::into_system(function, &mut world);
 
             assert_eq!(
                 system.type_id(),
@@ -1025,7 +1027,7 @@ mod tests {
 
             assert_ne!(
                 system.type_id(),
-                IntoSystem::into_system(reference_system).type_id(),
+                IntoSystem::into_system(reference_system, &mut world).type_id(),
                 "Different systems should have different TypeIds"
             );
         }

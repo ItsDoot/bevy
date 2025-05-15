@@ -17,16 +17,12 @@ use thiserror::Error;
 #[derive(Component)]
 #[require(SystemIdMarker)]
 pub(crate) struct RegisteredSystem<I, O> {
-    initialized: bool,
     system: BoxedSystem<I, O>,
 }
 
 impl<I, O> RegisteredSystem<I, O> {
     pub fn new(system: BoxedSystem<I, O>) -> Self {
-        RegisteredSystem {
-            initialized: false,
-            system,
-        }
+        RegisteredSystem { system }
     }
 }
 
@@ -41,17 +37,10 @@ pub struct SystemIdMarker;
 ///
 /// This struct is returned by [`World::unregister_system`].
 pub struct RemovedSystem<I = (), O = ()> {
-    initialized: bool,
     system: BoxedSystem<I, O>,
 }
 
 impl<I, O> RemovedSystem<I, O> {
-    /// Is the system initialized?
-    /// A system is initialized the first time it's ran.
-    pub fn initialized(&self) -> bool {
-        self.initialized
-    }
-
     /// The system removed from the storage.
     pub fn system(self) -> BoxedSystem<I, O> {
         self.system
@@ -162,7 +151,8 @@ impl World {
         I: SystemInput + 'static,
         O: 'static,
     {
-        self.register_boxed_system(Box::new(IntoSystem::into_system(system)))
+        let system = IntoSystem::into_system(system, self);
+        self.register_boxed_system(Box::new(system))
     }
 
     /// Similar to [`Self::register_system`], but allows passing in a [`BoxedSystem`].
@@ -199,7 +189,6 @@ impl World {
                     .ok_or(RegisteredSystemError::SelfRemove(id))?;
                 entity.despawn();
                 Ok(RemovedSystem {
-                    initialized: registered_system.initialized,
                     system: registered_system.system,
                 })
             }
@@ -338,18 +327,9 @@ impl World {
             .map_err(|_| RegisteredSystemError::SystemIdNotRegistered(id))?;
 
         // Take ownership of system trait object
-        let RegisteredSystem {
-            mut initialized,
-            mut system,
-        } = entity
+        let RegisteredSystem { mut system } = entity
             .take::<RegisteredSystem<I, O>>()
             .ok_or(RegisteredSystemError::Recursive(id))?;
-
-        // Run the system
-        if !initialized {
-            system.initialize(self);
-            initialized = true;
-        }
 
         let result = system
             .validate_param(self)
@@ -364,10 +344,7 @@ impl World {
 
         // Return ownership of system trait object (if entity still exists)
         if let Ok(mut entity) = self.get_entity_mut(id.entity) {
-            entity.insert::<RegisteredSystem<I, O>>(RegisteredSystem {
-                initialized,
-                system,
-            });
+            entity.insert::<RegisteredSystem<I, O>>(RegisteredSystem { system });
         }
 
         // Run any commands enqueued by the system
@@ -414,11 +391,10 @@ impl World {
         }
 
         self.resource_scope(|world, mut id: Mut<CachedSystemId<S>>| {
+            let system = IntoSystem::into_system(system, world);
             if let Ok(mut entity) = world.get_entity_mut(id.entity) {
                 if !entity.contains::<RegisteredSystem<I, O>>() {
-                    entity.insert(RegisteredSystem::new(Box::new(IntoSystem::into_system(
-                        system,
-                    ))));
+                    entity.insert(RegisteredSystem::new(Box::new(system)));
                 }
             } else {
                 id.entity = world.register_system(system).entity();
@@ -523,6 +499,7 @@ impl<I: SystemInput, O> core::fmt::Debug for RegisteredSystemError<I, O> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::boxed::Box;
     use core::cell::Cell;
 
     use bevy_utils::default;
@@ -792,7 +769,8 @@ mod tests {
         struct Foo;
         impl IntoSystem<(), Result<()>, ()> for Foo {
             type System = ApplyDeferred;
-            fn into_system(_: Self) -> Self::System {
+
+            fn dyn_into_system(self: Box<Self>, _world: &mut World) -> Self::System {
                 ApplyDeferred
             }
         }
@@ -800,7 +778,8 @@ mod tests {
         struct Bar;
         impl IntoSystem<(), Result<()>, ()> for Bar {
             type System = ApplyDeferred;
-            fn into_system(_: Self) -> Self::System {
+
+            fn dyn_into_system(self: Box<Self>, _world: &mut World) -> Self::System {
                 ApplyDeferred
             }
         }

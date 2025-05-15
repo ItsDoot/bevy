@@ -464,13 +464,11 @@ impl Schedule {
         }
     }
 
-    /// Initializes any newly-added systems and conditions, rebuilds the executable schedule,
-    /// and re-initializes the executor.
+    /// Rebuilds the executable schedule and re-initializes the executor.
     ///
     /// Moves all systems and run conditions out of the [`ScheduleGraph`].
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
         if self.graph.changed {
-            self.graph.initialize(world);
             let ignored_ambiguities = world
                 .get_resource_or_init::<Schedules>()
                 .ignored_scheduling_ambiguities
@@ -670,9 +668,6 @@ pub struct ScheduleGraph {
     system_set_conditions: Vec<Vec<BoxedCondition>>,
     /// Map from system set to node id
     system_set_ids: HashMap<InternedSystemSet, NodeId>,
-    /// Systems that have not been initialized yet; for system sets, we store the index of the first uninitialized condition
-    /// (all the conditions after that index still need to be initialized)
-    uninit: Vec<(NodeId, usize)>,
     /// Directed acyclic graph of the hierarchy (which systems/sets are children of which sets)
     hierarchy: Dag,
     /// Directed acyclic graph of the dependency (which systems/sets have to run before which other systems/sets)
@@ -697,7 +692,6 @@ impl ScheduleGraph {
             system_sets: Vec::new(),
             system_set_conditions: Vec::new(),
             system_set_ids: HashMap::default(),
-            uninit: Vec::new(),
             hierarchy: Dag::new(),
             dependency: Dag::new(),
             ambiguous_with: UnGraph::default(),
@@ -963,8 +957,6 @@ impl ScheduleGraph {
         // graph updates are immediate
         self.update_graphs(id, config.metadata)?;
 
-        // system init has to be deferred (need `&mut World`)
-        self.uninit.push((id, 0));
         self.systems.push(SystemNode::new(config.node));
         self.system_conditions.push(config.conditions);
 
@@ -995,9 +987,7 @@ impl ScheduleGraph {
         // graph updates are immediate
         self.update_graphs(id, metadata)?;
 
-        // system init has to be deferred (need `&mut World`)
         let system_set_conditions = &mut self.system_set_conditions[id.index()];
-        self.uninit.push((id, system_set_conditions.len()));
         system_set_conditions.append(&mut conditions);
 
         Ok(id)
@@ -1143,25 +1133,6 @@ impl ScheduleGraph {
         }
 
         Ok(())
-    }
-
-    /// Initializes any newly-added systems and conditions by calling [`System::initialize`](crate::system::System)
-    pub fn initialize(&mut self, world: &mut World) {
-        for (id, i) in self.uninit.drain(..) {
-            match id {
-                NodeId::System(index) => {
-                    self.systems[index].get_mut().unwrap().initialize(world);
-                    for condition in &mut self.system_conditions[index] {
-                        condition.initialize(world);
-                    }
-                }
-                NodeId::Set(index) => {
-                    for condition in self.system_set_conditions[index].iter_mut().skip(i) {
-                        condition.initialize(world);
-                    }
-                }
-            }
-        }
     }
 
     /// Build a [`SystemSchedule`] optimized for scheduler access from the [`ScheduleGraph`].
@@ -1506,10 +1477,6 @@ impl ScheduleGraph {
         ignored_ambiguities: &BTreeSet<ComponentId>,
         schedule_label: InternedScheduleLabel,
     ) -> Result<(), ScheduleBuildError> {
-        if !self.uninit.is_empty() {
-            return Err(ScheduleBuildError::Uninitialized);
-        }
-
         // move systems out of old schedule
         for ((id, system), conditions) in schedule
             .system_ids

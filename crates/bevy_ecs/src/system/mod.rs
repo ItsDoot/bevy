@@ -135,6 +135,7 @@ mod system_name;
 mod system_param;
 mod system_registry;
 
+use alloc::boxed::Box;
 use core::any::TypeId;
 
 pub use adapter_system::*;
@@ -182,12 +183,22 @@ use crate::world::{FromWorld, World};
     message = "`{Self}` is not a valid system with input `{In}` and output `{Out}`",
     label = "invalid system"
 )]
-pub trait IntoSystem<In: SystemInput, Out, Marker>: Sized {
+pub trait IntoSystem<In: SystemInput, Out, Marker> {
     /// The type of [`System`] that this instance converts into.
     type System: System<In = In, Out = Out>;
 
     /// Turns this value into its corresponding [`System`].
-    fn into_system(this: Self) -> Self::System;
+    ///
+    /// `dyn`-compatible version of [`IntoSystem::into_system`].
+    fn dyn_into_system(self: Box<Self>, world: &mut World) -> Self::System;
+
+    /// Turns this value into its corresponding [`System`].
+    fn into_system(this: Self, world: &mut World) -> Self::System
+    where
+        Self: Sized,
+    {
+        Self::dyn_into_system(Box::new(this), world)
+    }
 
     /// Pass the output of this system `A` into a second system `B`, creating a new compound system.
     ///
@@ -195,6 +206,7 @@ pub trait IntoSystem<In: SystemInput, Out, Marker>: Sized {
     /// where `T` is the return type of the first system.
     fn pipe<B, BIn, BOut, MarkerB>(self, system: B) -> IntoPipeSystem<Self, B>
     where
+        Self: Sized,
         Out: 'static,
         B: IntoSystem<BIn, BOut, MarkerB>,
         for<'a> BIn: SystemInput<Inner<'a> = Out>,
@@ -223,6 +235,7 @@ pub trait IntoSystem<In: SystemInput, Out, Marker>: Sized {
     /// ```
     fn map<T, F>(self, f: F) -> IntoAdapterSystem<F, Self>
     where
+        Self: Sized,
         F: Send + Sync + 'static + FnMut(Out) -> T,
     {
         IntoAdapterSystem::new(f, self)
@@ -250,12 +263,13 @@ pub trait IntoSystem<In: SystemInput, Out, Marker>: Sized {
     /// schedule.add_systems(my_system.with_input(0));
     /// # bevy_ecs::system::assert_is_system(my_system.with_input(0));
     /// ```
-    fn with_input<T>(self, value: T) -> WithInputWrapper<Self::System, T>
+    fn with_input<T>(self, value: T) -> IntoWithInputSystem<Self, T>
     where
+        Self: Sized,
         for<'i> In: SystemInput<Inner<'i> = &'i mut T>,
         T: Send + Sync + 'static,
     {
-        WithInputWrapper::new(self, value)
+        IntoWithInputSystem::new(self, value)
     }
 
     /// Passes a mutable reference to a value of type `T` created via
@@ -291,12 +305,13 @@ pub trait IntoSystem<In: SystemInput, Out, Marker>: Sized {
     /// schedule.add_systems(my_system.with_input_from::<MyData>());
     /// # bevy_ecs::system::assert_is_system(my_system.with_input_from::<MyData>());
     /// ```
-    fn with_input_from<T>(self) -> WithInputFromWrapper<Self::System, T>
+    fn with_input_from<T>(self) -> IntoWithInputFromWorldSystem<Self, T>
     where
+        Self: Sized,
         for<'i> In: SystemInput<Inner<'i> = &'i mut T>,
         T: FromWorld + Send + Sync + 'static,
     {
-        WithInputFromWrapper::new(self)
+        IntoWithInputFromWorldSystem::new(self)
     }
 
     /// Get the [`TypeId`] of the [`System`] produced after calling [`into_system`](`IntoSystem::into_system`).
@@ -309,7 +324,12 @@ pub trait IntoSystem<In: SystemInput, Out, Marker>: Sized {
 // All systems implicitly implement IntoSystem.
 impl<T: System> IntoSystem<T::In, T::Out, ()> for T {
     type System = T;
-    fn into_system(this: Self) -> Self {
+
+    fn dyn_into_system(self: Box<Self>, _world: &mut World) -> Self::System {
+        *self
+    }
+
+    fn into_system(this: Self, _world: &mut World) -> Self {
         this
     }
 }
@@ -341,11 +361,9 @@ impl<T: System> IntoSystem<T::In, T::Out, ()> for T {
 pub fn assert_is_system<In: SystemInput, Out: 'static, Marker>(
     system: impl IntoSystem<In, Out, Marker>,
 ) {
-    let mut system = IntoSystem::into_system(system);
-
     // Initialize the system, which will panic if the system has access conflicts.
     let mut world = World::new();
-    system.initialize(&mut world);
+    IntoSystem::into_system(system, &mut world);
 }
 
 /// Ensure that a given function is a [read-only system](ReadOnlySystem).
@@ -388,8 +406,7 @@ where
 /// Note: this will run the system on an empty world.
 pub fn assert_system_does_not_conflict<Out, Params, S: IntoSystem<(), Out, Params>>(sys: S) {
     let mut world = World::new();
-    let mut system = IntoSystem::into_system(sys);
-    system.initialize(&mut world);
+    let mut system = IntoSystem::into_system(sys, &mut world);
     system.run((), &mut world);
 }
 
@@ -456,11 +473,10 @@ mod tests {
             }
         }
 
-        let mut system = IntoSystem::into_system(sys);
         let mut world = World::new();
+        let mut system = IntoSystem::into_system(sys, &mut world);
         world.spawn(A);
 
-        system.initialize(&mut world);
         system.run((), &mut world);
     }
 
@@ -1161,10 +1177,8 @@ mod tests {
         fn sys_y(_: Res<A>, _: ResMut<B>, _: Query<(&C, &mut D)>) {}
 
         let mut world = World::default();
-        let mut x = IntoSystem::into_system(sys_x);
-        let mut y = IntoSystem::into_system(sys_y);
-        x.initialize(&mut world);
-        y.initialize(&mut world);
+        let x = IntoSystem::into_system(sys_x, &mut world);
+        let y = IntoSystem::into_system(sys_y, &mut world);
 
         let conflicts = x.component_access().get_conflicts(y.component_access());
         let b_id = world
@@ -1190,12 +1204,10 @@ mod tests {
         let mut world = World::default();
         world.spawn(A).insert(C);
 
-        let mut without_filter = IntoSystem::into_system(without_filter);
-        without_filter.initialize(&mut world);
+        let mut without_filter = IntoSystem::into_system(without_filter, &mut world);
         without_filter.run((), &mut world);
 
-        let mut with_filter = IntoSystem::into_system(with_filter);
-        with_filter.initialize(&mut world);
+        let mut with_filter = IntoSystem::into_system(with_filter, &mut world);
         with_filter.run((), &mut world);
     }
 
@@ -1240,10 +1252,8 @@ mod tests {
         ) {
         }
         let mut world = World::default();
-        let mut x = IntoSystem::into_system(sys_x);
-        let mut y = IntoSystem::into_system(sys_y);
-        x.initialize(&mut world);
-        y.initialize(&mut world);
+        IntoSystem::into_system(sys_x, &mut world);
+        IntoSystem::into_system(sys_y, &mut world);
     }
 
     #[test]
@@ -1462,8 +1472,7 @@ mod tests {
 
             fn immutable_query(_: Query<&A>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1477,8 +1486,7 @@ mod tests {
 
             fn immutable_query(_: Query<Option<&A>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1492,8 +1500,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B)>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1507,8 +1514,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B)>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1522,8 +1528,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), With<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1537,8 +1542,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), Without<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1552,8 +1556,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), Added<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1567,8 +1570,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B), Changed<C>>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
 
         {
@@ -1582,8 +1584,7 @@ mod tests {
 
             fn immutable_query(_: Query<(&A, &B, SpawnDetails), Spawned>) {}
 
-            let mut sys = IntoSystem::into_system(mutable_query);
-            sys.initialize(&mut world);
+            IntoSystem::into_system(mutable_query, &mut world);
         }
     }
 
@@ -1594,12 +1595,11 @@ mod tests {
         fn a_not_b_system(_query: Query<&A, Without<B>>) {}
 
         let mut world = World::default();
-        let mut system = IntoSystem::into_system(a_not_b_system);
+        let mut system = IntoSystem::into_system(a_not_b_system, &mut world);
         let mut expected_ids = HashSet::<ArchetypeComponentId>::new();
         let a_id = world.register_component::<A>();
 
         // set up system and verify its access is empty
-        system.initialize(&mut world);
         system.update_archetype_component_access(world.as_unsafe_world_cell());
         let archetype_component_access = system.archetype_component_access();
         assert!(expected_ids
@@ -1857,8 +1857,7 @@ mod tests {
 
         let mut world = World::new();
         world.init_resource::<Flag>();
-        let mut sys = IntoSystem::into_system(first.pipe(second));
-        sys.initialize(&mut world);
+        let mut sys = IntoSystem::into_system(first.pipe(second), &mut world);
 
         sys.run(default(), &mut world);
 
@@ -1992,8 +1991,7 @@ mod tests {
         }
 
         let mut world = World::new();
-        let mut system = IntoSystem::into_system(sys.with_input(42));
-        system.initialize(&mut world);
+        let mut system = IntoSystem::into_system(sys.with_input(42), &mut world);
         system.run((), &mut world);
         assert_eq!(*system.value(), 43);
     }
@@ -2013,11 +2011,9 @@ mod tests {
         }
 
         let mut world = World::new();
-        let mut system = IntoSystem::into_system(sys.with_input_from::<TestData>());
-        assert!(system.value().is_none());
-        system.initialize(&mut world);
-        assert!(system.value().is_some());
+        let mut system = IntoSystem::into_system(sys.with_input_from::<TestData>(), &mut world);
+        assert_eq!(system.value().0, 5);
         system.run((), &mut world);
-        assert_eq!(system.value().unwrap().0, 6);
+        assert_eq!(system.value().0, 6);
     }
 }

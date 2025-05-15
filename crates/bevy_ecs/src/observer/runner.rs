@@ -427,11 +427,6 @@ fn hook_on_add<E: Event, B: Bundle, S: ObserverSystem<E, B>>(
             if observe.error_handler.is_none() {
                 observe.error_handler = Some(default_error_handler());
             }
-            let system: *mut dyn ObserverSystem<E, B> = observe.system.downcast_mut::<S>().unwrap();
-            // SAFETY: World reference is exclusive and initialize does not touch system, so references do not alias
-            unsafe {
-                (*system).initialize(world);
-            }
             world.register_observer(entity);
         }
     });

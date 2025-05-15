@@ -519,11 +519,12 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<Events<TestEvent>>();
 
-        let mut reader =
-            IntoSystem::into_system(|mut events: EventReader<TestEvent>| -> Option<TestEvent> {
+        let mut reader = IntoSystem::into_system(
+            |mut events: EventReader<TestEvent>| -> Option<TestEvent> {
                 events.read().last().copied()
-            });
-        reader.initialize(&mut world);
+            },
+            &mut world,
+        );
 
         let last = reader.run((), &mut world);
         assert!(last.is_none(), "EventReader should be empty");
@@ -549,11 +550,12 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<Events<TestEvent>>();
 
-        let mut mutator =
-            IntoSystem::into_system(|mut events: EventMutator<TestEvent>| -> Option<TestEvent> {
+        let mut mutator = IntoSystem::into_system(
+            |mut events: EventMutator<TestEvent>| -> Option<TestEvent> {
                 events.read().last().copied()
-            });
-        mutator.initialize(&mut world);
+            },
+            &mut world,
+        );
 
         let last = mutator.run((), &mut world);
         assert!(last.is_none(), "EventMutator should be empty");
