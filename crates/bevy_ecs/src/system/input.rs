@@ -19,7 +19,7 @@ use crate::{bundle::Bundle, prelude::Trigger, system::System};
 ///
 /// # Examples
 ///
-/// ## Tuples of [`SystemInput`]s
+/// ## Tuples of [`SystemInput`]s;
 ///
 /// ```
 /// use bevy_ecs::prelude::*;

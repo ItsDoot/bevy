@@ -526,6 +526,20 @@ pub fn derive_system_set(input: TokenStream) -> TokenStream {
     derive_label(input, "SystemSet", &trait_path, &dyn_eq_path)
 }
 
+#[proc_macro_derive(AsyncSystemAwaitPoint)]
+pub fn derive_async_system_await_point(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let mut trait_path = bevy_ecs_path();
+    trait_path.segments.push(format_ident!("system").into());
+    trait_path.segments.push(format_ident!("point").into());
+    let mut dyn_eq_path = trait_path.clone();
+    trait_path
+        .segments
+        .push(format_ident!("AsyncSystemAwaitPoint").into());
+    dyn_eq_path.segments.push(format_ident!("DynEq").into());
+    derive_label(input, "AsyncSystemAwaitPoint", &trait_path, &dyn_eq_path)
+}
+
 pub(crate) fn bevy_ecs_path() -> syn::Path {
     BevyManifest::shared().get_path("bevy_ecs")
 }

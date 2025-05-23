@@ -139,6 +139,7 @@ mod system_registry;
 use core::any::TypeId;
 
 pub use adapter_system::*;
+pub use asynchronous::*;
 pub use builder::*;
 pub use combinator::*;
 pub use commands::*;
