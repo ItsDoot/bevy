@@ -35,6 +35,12 @@ impl BevyError {
         self.inner.error.downcast_ref::<E>()
     }
 
+    /// Returns a [`Display`]/[`Debug`] impl that only shows the error message
+    /// (i.e. excluding the backtrace).
+    pub fn message(&self) -> impl Display + Debug + '_ {
+        BevyErrorMessage(self)
+    }
+
     fn format_backtrace(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         #[cfg(feature = "backtrace")]
         {
@@ -130,6 +136,24 @@ impl Debug for BevyError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         writeln!(f, "{:?}", self.inner.error)?;
         self.format_backtrace(f)?;
+        Ok(())
+    }
+}
+
+struct BevyErrorMessage<'a>(&'a BevyError);
+
+impl Display for BevyErrorMessage<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "{}", self.0.inner.error)?;
+
+        Ok(())
+    }
+}
+
+impl Debug for BevyErrorMessage<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "{:?}", self.0.inner.error)?;
+
         Ok(())
     }
 }
