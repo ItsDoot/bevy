@@ -207,7 +207,7 @@ impl World {
         }
     }
 
-    /// Run stored systems by their [`SystemId`].
+    /// Run a stored system by its [`SystemId`].
     /// Before running a system, it must first be registered.
     /// The method [`World::register_system`] stores a given system and returns a [`SystemId`].
     /// This is different from [`RunSystemOnce::run_system_once`](crate::system::RunSystemOnce::run_system_once),
@@ -299,7 +299,7 @@ impl World {
         self.run_system_with(id, ())
     }
 
-    /// Run a stored chained system by its [`SystemId`], providing an input value.
+    /// Run a stored system by its [`SystemId`], providing an input value.
     /// Before running a system, it must first be registered.
     /// The method [`World::register_system`] stores a given system and returns a [`SystemId`].
     ///
@@ -372,6 +372,72 @@ impl World {
 
         // Run any commands enqueued by the system
         self.flush();
+        result
+    }
+
+    /// Validate a stored system by its [`SystemId`].
+    /// Before validating a system, it must first be [registered](World::register_system).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use bevy_ecs::prelude::*;
+    ///
+    /// #[derive(Resource)]
+    /// struct PlayerScore(i32);
+    ///
+    /// fn get_player_score(player_score: Res<PlayerScore>) -> i32 {
+    ///   player_score.0
+    /// }
+    ///
+    /// let mut world = World::default();
+    /// let counter_one = world.register_system(get_player_score);
+    /// assert!(world.validate_system(counter_one).is_err());
+    /// world.insert_resource(PlayerScore(3));
+    /// assert!(world.validate_system(counter_one).is_ok());
+    /// ```
+    ///
+    /// See [`World::run_system`] for more examples.
+    pub fn validate_system<I, O>(
+        &mut self,
+        id: SystemId<I, O>,
+    ) -> Result<(), RegisteredSystemError<I, O>>
+    where
+        I: SystemInput + 'static,
+        O: 'static,
+    {
+        // Lookup
+        let mut entity = self
+            .get_entity_mut(id.entity)
+            .map_err(|_| RegisteredSystemError::SystemIdNotRegistered(id))?;
+
+        // Take ownership of system trait object
+        let RegisteredSystem {
+            mut initialized,
+            mut system,
+        } = entity
+            .take::<RegisteredSystem<I, O>>()
+            .ok_or(RegisteredSystemError::Recursive(id))?;
+
+        // Initialize the system
+        if !initialized {
+            system.initialize(self);
+            initialized = true;
+        }
+
+        // Validate the system parameters
+        let result = system
+            .validate_param(self)
+            .map_err(|err| RegisteredSystemError::InvalidParams { system: id, err });
+
+        // Return ownership of system trait object (if entity still exists)
+        if let Ok(mut entity) = self.get_entity_mut(id.entity) {
+            entity.insert::<RegisteredSystem<I, O>>(RegisteredSystem {
+                initialized,
+                system,
+            });
+        }
+
         result
     }
 
