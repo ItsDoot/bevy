@@ -415,7 +415,7 @@ mod tests {
         resource::Resource,
         schedule::{
             common_conditions::resource_exists, ApplyDeferred, IntoScheduleConfigs, Schedule,
-            SystemCondition,
+            SystemArc, SystemCondition,
         },
         system::{
             Commands, In, InMut, IntoSystem, Local, NonSend, NonSendMut, ParamSet, Query, Res,
@@ -423,8 +423,6 @@ mod tests {
         },
         world::{DeferredWorld, EntityMut, FromWorld, World},
     };
-
-    use super::ScheduleSystem;
 
     #[derive(Resource, PartialEq, Debug)]
     enum SystemRan {
@@ -464,10 +462,7 @@ mod tests {
         system.run((), &mut world).unwrap();
     }
 
-    fn run_system<Marker, S: IntoScheduleConfigs<ScheduleSystem, Marker>>(
-        world: &mut World,
-        system: S,
-    ) {
+    fn run_system<Marker, S: IntoScheduleConfigs<SystemArc, Marker>>(world: &mut World, system: S) {
         let mut schedule = Schedule::default();
         schedule.add_systems(system);
         schedule.run(world);

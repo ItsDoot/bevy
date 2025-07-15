@@ -1,246 +1,104 @@
-use alloc::{boxed::Box, vec::Vec};
-use bevy_utils::prelude::DebugName;
-use core::{
-    any::TypeId,
-    ops::{Index, IndexMut, Range},
-};
+use alloc::{sync::Arc, vec::Vec};
+use core::ops::{Deref, DerefMut, Index, Range};
 
-use bevy_platform::collections::HashMap;
+use bevy_platform::{
+    collections::HashMap,
+    sync::{Mutex, PoisonError},
+};
 use slotmap::{new_key_type, SecondaryMap, SlotMap};
 
 use crate::{
-    component::{CheckChangeTicks, ComponentId, Tick},
-    prelude::{SystemIn, SystemSet},
+    component::ComponentId,
+    prelude::SystemSet,
     query::FilteredAccessSet,
-    schedule::{BoxedCondition, InternedSystemSet},
-    system::{
-        ReadOnlySystem, RunSystemError, ScheduleSystem, System, SystemParamValidationError,
-        SystemStateFlags,
-    },
-    world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
+    schedule::InternedSystemSet,
+    system::{IntoSystem, ReadOnlySystem, System},
+    world::World,
 };
 
-/// A [`SystemWithAccess`] stored in a [`ScheduleGraph`](crate::schedule::ScheduleGraph).
-pub(crate) struct SystemNode {
-    pub(crate) inner: Option<SystemWithAccess>,
-}
-
-/// A [`ScheduleSystem`] stored alongside the access returned from [`System::initialize`].
-pub struct SystemWithAccess {
+/// A wrapper around a system that provides access to it and its access set.
+pub struct WithAccess<S: System + ?Sized> {
+    /// The access returned by [`System::initialize`](crate::system::System::initialize).
+    /// This will be empty if the system has not been initialized yet.
+    pub access: FilteredAccessSet<ComponentId>,
     /// The system itself.
-    pub system: ScheduleSystem,
-    /// The access returned by [`System::initialize`].
-    /// This will be empty if the system has not been initialized yet.
-    pub access: FilteredAccessSet<ComponentId>,
+    pub system: S,
 }
 
-impl SystemWithAccess {
-    /// Constructs a new [`SystemWithAccess`] from a [`ScheduleSystem`].
+impl<S: System> WithAccess<S> {
+    /// Constructs a new [`WithAccess`] from a [`System`].
     /// The `access` will initially be empty.
-    pub fn new(system: ScheduleSystem) -> Self {
+    pub fn new(system: S) -> Self {
         Self {
+            access: FilteredAccessSet::new(),
             system,
-            access: FilteredAccessSet::new(),
-        }
-    }
-}
-
-impl System for SystemWithAccess {
-    type In = ();
-    type Out = ();
-
-    #[inline]
-    fn name(&self) -> DebugName {
-        self.system.name()
-    }
-
-    #[inline]
-    fn type_id(&self) -> TypeId {
-        self.system.type_id()
-    }
-
-    #[inline]
-    fn flags(&self) -> SystemStateFlags {
-        self.system.flags()
-    }
-
-    #[inline]
-    unsafe fn run_unsafe(
-        &mut self,
-        input: SystemIn<'_, Self>,
-        world: UnsafeWorldCell,
-    ) -> Result<Self::Out, RunSystemError> {
-        // SAFETY: Caller ensures the same safety requirements.
-        unsafe { self.system.run_unsafe(input, world) }
-    }
-
-    #[cfg(feature = "hotpatching")]
-    #[inline]
-    fn refresh_hotpatch(&mut self) {
-        self.system.refresh_hotpatch();
-    }
-
-    #[inline]
-    fn apply_deferred(&mut self, world: &mut World) {
-        self.system.apply_deferred(world);
-    }
-
-    #[inline]
-    fn queue_deferred(&mut self, world: DeferredWorld) {
-        self.system.queue_deferred(world);
-    }
-
-    #[inline]
-    unsafe fn validate_param_unsafe(
-        &mut self,
-        world: UnsafeWorldCell,
-    ) -> Result<(), SystemParamValidationError> {
-        // SAFETY: Caller ensures the same safety requirements.
-        unsafe { self.system.validate_param_unsafe(world) }
-    }
-
-    #[inline]
-    fn initialize(&mut self, world: &mut World) -> FilteredAccessSet<ComponentId> {
-        self.system.initialize(world)
-    }
-
-    #[inline]
-    fn check_change_tick(&mut self, check: CheckChangeTicks) {
-        self.system.check_change_tick(check);
-    }
-
-    #[inline]
-    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
-        self.system.default_system_sets()
-    }
-
-    #[inline]
-    fn get_last_run(&self) -> Tick {
-        self.system.get_last_run()
-    }
-
-    #[inline]
-    fn set_last_run(&mut self, last_run: Tick) {
-        self.system.set_last_run(last_run);
-    }
-}
-
-/// A [`BoxedCondition`] stored alongside the access returned from [`System::initialize`].
-pub struct ConditionWithAccess {
-    /// The condition itself.
-    pub condition: BoxedCondition,
-    /// The access returned by [`System::initialize`].
-    /// This will be empty if the system has not been initialized yet.
-    pub access: FilteredAccessSet<ComponentId>,
-}
-
-impl ConditionWithAccess {
-    /// Constructs a new [`ConditionWithAccess`] from a [`BoxedCondition`].
-    /// The `access` will initially be empty.
-    pub const fn new(condition: BoxedCondition) -> Self {
-        Self {
-            condition,
-            access: FilteredAccessSet::new(),
-        }
-    }
-}
-
-impl System for ConditionWithAccess {
-    type In = ();
-    type Out = bool;
-
-    #[inline]
-    fn name(&self) -> DebugName {
-        self.condition.name()
-    }
-
-    #[inline]
-    fn type_id(&self) -> TypeId {
-        self.condition.type_id()
-    }
-
-    #[inline]
-    fn flags(&self) -> SystemStateFlags {
-        self.condition.flags()
-    }
-
-    #[inline]
-    unsafe fn run_unsafe(
-        &mut self,
-        input: SystemIn<'_, Self>,
-        world: UnsafeWorldCell,
-    ) -> Result<Self::Out, RunSystemError> {
-        // SAFETY: Caller ensures the same safety requirements.
-        unsafe { self.condition.run_unsafe(input, world) }
-    }
-
-    #[cfg(feature = "hotpatching")]
-    #[inline]
-    fn refresh_hotpatch(&mut self) {
-        self.condition.refresh_hotpatch();
-    }
-
-    #[inline]
-    fn apply_deferred(&mut self, world: &mut World) {
-        self.condition.apply_deferred(world);
-    }
-
-    #[inline]
-    fn queue_deferred(&mut self, world: DeferredWorld) {
-        self.condition.queue_deferred(world);
-    }
-
-    #[inline]
-    unsafe fn validate_param_unsafe(
-        &mut self,
-        world: UnsafeWorldCell,
-    ) -> Result<(), SystemParamValidationError> {
-        // SAFETY: Caller ensures the same safety requirements.
-        unsafe { self.condition.validate_param_unsafe(world) }
-    }
-
-    #[inline]
-    fn initialize(&mut self, world: &mut World) -> FilteredAccessSet<ComponentId> {
-        self.condition.initialize(world)
-    }
-
-    #[inline]
-    fn check_change_tick(&mut self, check: CheckChangeTicks) {
-        self.condition.check_change_tick(check);
-    }
-
-    #[inline]
-    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
-        self.condition.default_system_sets()
-    }
-
-    #[inline]
-    fn get_last_run(&self) -> Tick {
-        self.condition.get_last_run()
-    }
-
-    #[inline]
-    fn set_last_run(&mut self, last_run: Tick) {
-        self.condition.set_last_run(last_run);
-    }
-}
-
-impl SystemNode {
-    /// Create a new [`SystemNode`]
-    pub fn new(system: ScheduleSystem) -> Self {
-        Self {
-            inner: Some(SystemWithAccess::new(system)),
         }
     }
 
-    /// Obtain a reference to the [`SystemWithAccess`] represented by this node.
-    pub fn get(&self) -> Option<&SystemWithAccess> {
-        self.inner.as_ref()
+    /// Initializes this system and stores its access.
+    pub fn initialize(&mut self, world: &mut World) {
+        self.access = self.system.initialize(world);
+    }
+}
+
+impl<S: System + ?Sized> Deref for WithAccess<S> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        &self.system
+    }
+}
+
+impl<S: System + ?Sized> DerefMut for WithAccess<S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.system
+    }
+}
+
+/// A wrapper around a system that provides access to it via an `Arc<Mutex<_>>`.
+pub struct SystemArc<S: System + ?Sized = dyn System<In = (), Out = ()>>(Arc<Mutex<WithAccess<S>>>);
+
+/// A wrapper around a condition that provides access to it via an `Arc<Mutex<_>>`.
+pub type ConditionArc<In = ()> = SystemArc<dyn ReadOnlySystem<In = In, Out = bool>>;
+
+impl<S: System> SystemArc<S> {
+    /// Converts a system into a [`SystemArc`].
+    pub fn new<M>(
+        system: impl IntoSystem<S::In, S::Out, M, System = S>,
+    ) -> SystemArc<dyn System<In = S::In, Out = S::Out>> {
+        SystemArc(Arc::new(Mutex::new(WithAccess::new(
+            IntoSystem::into_system(system),
+        ))))
+    }
+}
+
+impl<S: ReadOnlySystem> SystemArc<S> {
+    /// Converts a read-only system into a [`SystemArc`].
+    pub fn new_readonly<M>(
+        system: impl IntoSystem<S::In, S::Out, M, System = S>,
+    ) -> SystemArc<dyn ReadOnlySystem<In = S::In, Out = S::Out>> {
+        SystemArc(Arc::new(Mutex::new(WithAccess::new(
+            IntoSystem::into_system(system),
+        ))))
+    }
+}
+
+impl<S: System + ?Sized> SystemArc<S> {
+    /// Initializes the system and stores its access.
+    pub fn initialize(&self, world: &mut World) {
+        let mut system = self.lock();
+        system.access = system.system.initialize(world);
     }
 
-    /// Obtain a mutable reference to the [`SystemWithAccess`] represented by this node.
-    pub fn get_mut(&mut self) -> Option<&mut SystemWithAccess> {
-        self.inner.as_mut()
+    /// Acquires a lock on the system, allowing access to it.
+    pub fn lock(&self) -> impl DerefMut<Target = WithAccess<S>> + '_ {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl<S: System + ?Sized> Clone for SystemArc<S> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
@@ -255,9 +113,9 @@ new_key_type! {
 #[derive(Default)]
 pub struct Systems {
     /// List of systems in the schedule.
-    nodes: SlotMap<SystemKey, SystemNode>,
+    nodes: SlotMap<SystemKey, SystemArc>,
     /// List of conditions for each system, in the same order as `nodes`.
-    conditions: SecondaryMap<SystemKey, Vec<ConditionWithAccess>>,
+    conditions: SecondaryMap<SystemKey, Vec<ConditionArc>>,
     /// Systems and their conditions that have not been initialized yet.
     uninit: Vec<SystemKey>,
 }
@@ -274,23 +132,8 @@ impl Systems {
     }
 
     /// Returns a reference to the system with the given key, if it exists.
-    pub fn get(&self, key: SystemKey) -> Option<&SystemWithAccess> {
-        self.nodes.get(key).and_then(|node| node.get())
-    }
-
-    /// Returns a mutable reference to the system with the given key, if it exists.
-    pub fn get_mut(&mut self, key: SystemKey) -> Option<&mut SystemWithAccess> {
-        self.nodes.get_mut(key).and_then(|node| node.get_mut())
-    }
-
-    /// Returns a mutable reference to the system with the given key, panicking
-    /// if it does not exist.
-    ///
-    /// # Panics
-    ///
-    /// If the system with the given key does not exist in this container.
-    pub(crate) fn node_mut(&mut self, key: SystemKey) -> &mut SystemNode {
-        &mut self.nodes[key]
+    pub fn get(&self, key: SystemKey) -> Option<&SystemArc> {
+        self.nodes.get(key)
     }
 
     /// Returns `true` if the system with the given key has conditions.
@@ -301,28 +144,25 @@ impl Systems {
     }
 
     /// Returns a reference to the conditions for the system with the given key, if it exists.
-    pub fn get_conditions(&self, key: SystemKey) -> Option<&[ConditionWithAccess]> {
+    pub fn get_conditions(&self, key: SystemKey) -> Option<&[ConditionArc]> {
         self.conditions.get(key).map(Vec::as_slice)
     }
 
     /// Returns a mutable reference to the conditions for the system with the given key, if it exists.
-    pub fn get_conditions_mut(&mut self, key: SystemKey) -> Option<&mut Vec<ConditionWithAccess>> {
+    pub fn get_conditions_mut(&mut self, key: SystemKey) -> Option<&mut Vec<ConditionArc>> {
         self.conditions.get_mut(key)
     }
 
     /// Returns an iterator over all systems and their conditions in this
     /// container.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (SystemKey, &ScheduleSystem, &[ConditionWithAccess])> + '_ {
-        self.nodes.iter().filter_map(|(key, node)| {
-            let system = &node.get()?.system;
+    pub fn iter(&self) -> impl Iterator<Item = (SystemKey, &SystemArc, &[ConditionArc])> + '_ {
+        self.nodes.iter().map(|(key, system)| {
             let conditions = self
                 .conditions
                 .get(key)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            Some((key, system, conditions))
+            (key, system, conditions)
         })
     }
 
@@ -333,19 +173,9 @@ impl Systems {
     /// `&mut World` access, so we store these in a list until
     /// [`Systems::initialize`] is called. This is usually done upon the first
     /// run of the schedule.
-    pub fn insert(
-        &mut self,
-        system: ScheduleSystem,
-        conditions: Vec<Box<dyn ReadOnlySystem<In = (), Out = bool>>>,
-    ) -> SystemKey {
-        let key = self.nodes.insert(SystemNode::new(system));
-        self.conditions.insert(
-            key,
-            conditions
-                .into_iter()
-                .map(ConditionWithAccess::new)
-                .collect(),
-        );
+    pub fn insert(&mut self, system: SystemArc, conditions: Vec<ConditionArc>) -> SystemKey {
+        let key = self.nodes.insert(system);
+        self.conditions.insert(key, conditions);
         self.uninit.push(key);
         key
     }
@@ -359,34 +189,24 @@ impl Systems {
     /// initialized yet.
     pub fn initialize(&mut self, world: &mut World) {
         for key in self.uninit.drain(..) {
-            let Some(system) = self.nodes.get_mut(key).and_then(|node| node.get_mut()) else {
-                continue;
-            };
-            system.access = system.system.initialize(world);
-            let Some(conditions) = self.conditions.get_mut(key) else {
-                continue;
-            };
-            for condition in conditions {
-                condition.access = condition.condition.initialize(world);
+            if let Some(system) = self.nodes.get(key) {
+                system.initialize(world);
+            }
+            if let Some(conditions) = self.conditions.get(key) {
+                for condition in conditions {
+                    condition.initialize(world);
+                }
             }
         }
     }
 }
 
 impl Index<SystemKey> for Systems {
-    type Output = SystemWithAccess;
+    type Output = SystemArc;
 
     #[track_caller]
     fn index(&self, key: SystemKey) -> &Self::Output {
         self.get(key)
-            .unwrap_or_else(|| panic!("System with key {:?} does not exist in the schedule", key))
-    }
-}
-
-impl IndexMut<SystemKey> for Systems {
-    #[track_caller]
-    fn index_mut(&mut self, key: SystemKey) -> &mut Self::Output {
-        self.get_mut(key)
             .unwrap_or_else(|| panic!("System with key {:?} does not exist in the schedule", key))
     }
 }
@@ -397,7 +217,7 @@ pub struct SystemSets {
     /// List of system sets in the schedule.
     sets: SlotMap<SystemSetKey, InternedSystemSet>,
     /// List of conditions for each system set, in the same order as `sets`.
-    conditions: SecondaryMap<SystemSetKey, Vec<ConditionWithAccess>>,
+    conditions: SecondaryMap<SystemSetKey, Vec<ConditionArc>>,
     /// Map from system sets to their keys.
     ids: HashMap<InternedSystemSet, SystemSetKey>,
     /// System sets that have not been initialized yet.
@@ -461,24 +281,19 @@ impl SystemSets {
 
     /// Returns a reference to the conditions for the system set with the given
     /// key, if it exists.
-    pub fn get_conditions(&self, key: SystemSetKey) -> Option<&[ConditionWithAccess]> {
+    pub fn get_conditions(&self, key: SystemSetKey) -> Option<&[ConditionArc]> {
         self.conditions.get(key).map(Vec::as_slice)
     }
 
     /// Returns a mutable reference to the conditions for the system set with
     /// the given key, if it exists.
-    pub fn get_conditions_mut(
-        &mut self,
-        key: SystemSetKey,
-    ) -> Option<&mut Vec<ConditionWithAccess>> {
+    pub fn get_conditions_mut(&mut self, key: SystemSetKey) -> Option<&mut Vec<ConditionArc>> {
         self.conditions.get_mut(key)
     }
 
     /// Returns an iterator over all system sets in this container, along with
     /// their conditions.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (SystemSetKey, &dyn SystemSet, &[ConditionWithAccess])> {
+    pub fn iter(&self) -> impl Iterator<Item = (SystemSetKey, &dyn SystemSet, &[ConditionArc])> {
         self.sets.iter().filter_map(|(key, set)| {
             let conditions = self.conditions.get(key)?.as_slice();
             Some((key, &**set, conditions))
@@ -497,7 +312,7 @@ impl SystemSets {
     pub fn insert(
         &mut self,
         set: InternedSystemSet,
-        new_conditions: Vec<Box<dyn ReadOnlySystem<In = (), Out = bool>>>,
+        mut new_conditions: Vec<ConditionArc>,
     ) -> SystemSetKey {
         let key = self.get_key_or_insert(set);
         if !new_conditions.is_empty() {
@@ -507,7 +322,7 @@ impl SystemSets {
                 key,
                 uninitialized_conditions: start..(start + new_conditions.len()),
             });
-            current_conditions.extend(new_conditions.into_iter().map(ConditionWithAccess::new));
+            current_conditions.append(&mut new_conditions);
         }
         key
     }
@@ -524,11 +339,10 @@ impl SystemSets {
     /// initialization and only initialize those.
     pub fn initialize(&mut self, world: &mut World) {
         for uninit in self.uninit.drain(..) {
-            let Some(conditions) = self.conditions.get_mut(uninit.key) else {
-                continue;
-            };
-            for condition in &mut conditions[uninit.uninitialized_conditions] {
-                condition.access = condition.initialize(world);
+            if let Some(conditions) = self.conditions.get(uninit.key) {
+                for condition in &conditions[uninit.uninitialized_conditions] {
+                    condition.initialize(world);
+                }
             }
         }
     }
@@ -550,11 +364,11 @@ impl Index<SystemSetKey> for SystemSets {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, vec};
+    use alloc::vec;
 
     use crate::{
         prelude::SystemSet,
-        schedule::{SystemSets, Systems},
+        schedule::{SystemArc, SystemSets, Systems},
         system::IntoSystem,
         world::World,
     };
@@ -570,7 +384,7 @@ mod tests {
         assert!(systems.is_empty());
         assert_eq!(systems.len(), 0);
 
-        let system = Box::new(IntoSystem::into_system(empty_system));
+        let system = SystemArc::new(IntoSystem::into_system(empty_system));
         let key = systems.insert(system, vec![]);
 
         assert!(!systems.is_empty());
@@ -578,7 +392,6 @@ mod tests {
         assert!(systems.get(key).is_some());
         assert!(systems.get_conditions(key).is_some());
         assert!(systems.get_conditions(key).unwrap().is_empty());
-        assert!(systems.get_mut(key).is_some());
         assert!(!systems.is_initialized());
         assert!(systems.iter().next().is_some());
 
@@ -597,7 +410,7 @@ mod tests {
         assert!(sets.is_empty());
         assert_eq!(sets.len(), 0);
 
-        let condition = Box::new(IntoSystem::into_system(always_true));
+        let condition = SystemArc::new_readonly(IntoSystem::into_system(always_true));
         let key = sets.insert(TestSet.intern(), vec![condition]);
 
         assert!(!sets.is_empty());

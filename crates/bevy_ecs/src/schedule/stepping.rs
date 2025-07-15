@@ -663,7 +663,7 @@ impl ScheduleState {
         // PERF: If we add a way to efficiently query schedule systems by their TypeId, we could remove the full
         // system scan here
         for (key, system) in schedule.systems().unwrap() {
-            let behavior = self.behavior_updates.get(&system.type_id());
+            let behavior = self.behavior_updates.get(&system.lock().type_id());
             match behavior {
                 None => continue,
                 Some(None) => {
@@ -730,7 +730,7 @@ impl ScheduleState {
                 pos,
                 action,
                 behavior,
-                _system.name()
+                _system.lock().name()
             );
 
             match (action, behavior) {

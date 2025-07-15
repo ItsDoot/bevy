@@ -23,13 +23,12 @@ use thiserror::Error;
 #[cfg(feature = "trace")]
 use tracing::info_span;
 
-use crate::{component::CheckChangeTicks, system::System};
+use crate::component::CheckChangeTicks;
 use crate::{
     component::{ComponentId, Components},
     prelude::Component,
     resource::Resource,
     schedule::*,
-    system::ScheduleSystem,
     world::World,
 };
 
@@ -172,7 +171,7 @@ impl Schedules {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+        systems: impl IntoScheduleConfigs<SystemArc, M>,
     ) -> &mut Self {
         self.entry(schedule).add_systems(systems);
 
@@ -369,10 +368,7 @@ impl Schedule {
     }
 
     /// Add a collection of systems to the schedule.
-    pub fn add_systems<M>(
-        &mut self,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-    ) -> &mut Self {
+    pub fn add_systems<M>(&mut self, systems: impl IntoScheduleConfigs<SystemArc, M>) -> &mut Self {
         self.graph.process_configs(systems.into_configs(), false);
         self
     }
@@ -549,21 +545,22 @@ impl Schedule {
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
     pub fn check_change_ticks(&mut self, check: CheckChangeTicks) {
-        for system in &mut self.executable.systems {
-            if !is_apply_deferred(system) {
+        for system in &self.executable.systems {
+            let mut system = system.lock();
+            if !is_apply_deferred(&**system) {
                 system.check_change_tick(check);
             }
         }
 
-        for conditions in &mut self.executable.system_conditions {
+        for conditions in &self.executable.system_conditions {
             for condition in conditions {
-                condition.check_change_tick(check);
+                condition.lock().check_change_tick(check);
             }
         }
 
-        for conditions in &mut self.executable.set_conditions {
+        for conditions in &self.executable.set_conditions {
             for condition in conditions {
-                condition.check_change_tick(check);
+                condition.lock().check_change_tick(check);
             }
         }
     }
@@ -577,8 +574,8 @@ impl Schedule {
     /// This is used in rendering to extract data from the main world, storing the data in system buffers,
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
-        for SystemWithAccess { system, .. } in &mut self.executable.systems {
-            system.apply_deferred(world);
+        for system in &self.executable.systems {
+            system.lock().apply_deferred(world);
         }
     }
 
@@ -588,8 +585,7 @@ impl Schedule {
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (SystemKey, &ScheduleSystem)> + Sized, ScheduleNotInitialized>
-    {
+    ) -> Result<impl Iterator<Item = (SystemKey, &SystemArc)> + Sized, ScheduleNotInitialized> {
         if !self.executor_initialized {
             return Err(ScheduleNotInitialized);
         }
@@ -599,7 +595,7 @@ impl Schedule {
             .system_ids
             .iter()
             .zip(&self.executable.systems)
-            .map(|(&node_id, system)| (node_id, &system.system));
+            .map(|(&node_id, system)| (node_id, system));
 
         Ok(iter)
     }
@@ -729,7 +725,7 @@ impl ScheduleGraph {
     >(
         &mut self,
         configs: &mut [ScheduleConfigs<T>],
-        collective_conditions: Vec<BoxedCondition>,
+        collective_conditions: Vec<ConditionArc>,
     ) {
         if !collective_conditions.is_empty() {
             if let [config] = configs {
@@ -844,7 +840,7 @@ impl ScheduleGraph {
     }
 
     /// Add a [`ScheduleConfig`] to the graph, including its dependencies and conditions.
-    fn add_system_inner(&mut self, config: ScheduleConfig<ScheduleSystem>) -> SystemKey {
+    fn add_system_inner(&mut self, config: ScheduleConfig<SystemArc>) -> SystemKey {
         let key = self.systems.insert(config.node, config.conditions);
 
         // graph updates are immediate
@@ -1163,8 +1159,8 @@ impl ScheduleGraph {
                     "Encountered a non-system node in the flattened disconnected results: {b:?}"
                 );
             };
-            let system_a = &self.systems[a];
-            let system_b = &self.systems[b];
+            let system_a = self.systems[a].lock();
+            let system_b = self.systems[b].lock();
             if system_a.is_exclusive() || system_b.is_exclusive() {
                 conflicting_systems.push((a, b, Vec::new()));
             } else {
@@ -1315,39 +1311,36 @@ impl ScheduleGraph {
             return Err(ScheduleBuildError::Uninitialized);
         }
 
-        // move systems out of old schedule
-        for ((key, system), conditions) in schedule
-            .system_ids
-            .drain(..)
-            .zip(schedule.systems.drain(..))
-            .zip(schedule.system_conditions.drain(..))
-        {
-            self.systems.node_mut(key).inner = Some(system);
-            *self.systems.get_conditions_mut(key).unwrap() = conditions;
-        }
-
-        for (key, conditions) in schedule
-            .set_ids
-            .drain(..)
-            .zip(schedule.set_conditions.drain(..))
-        {
-            *self.system_sets.get_conditions_mut(key).unwrap() = conditions;
-        }
-
         *schedule = self.build_schedule(world, schedule_label, ignored_ambiguities)?;
 
-        // move systems into new schedule
-        for &key in &schedule.system_ids {
-            let system = self.systems.node_mut(key).inner.take().unwrap();
-            let conditions = core::mem::take(self.systems.get_conditions_mut(key).unwrap());
-            schedule.systems.push(system);
-            schedule.system_conditions.push(conditions);
-        }
+        // clone systems into new schedule
+        let (systems, system_conditions): (Vec<_>, Vec<_>) = schedule
+            .system_ids
+            .iter()
+            .map(|&key| {
+                let system = self.systems[key].clone();
+                let conditions = self
+                    .systems
+                    .get_conditions(key)
+                    .unwrap_or_default()
+                    .to_vec();
+                (system, conditions)
+            })
+            .unzip();
+        let set_conditions: Vec<_> = schedule
+            .set_ids
+            .iter()
+            .map(|&key| {
+                self.system_sets
+                    .get_conditions(key)
+                    .unwrap_or_default()
+                    .to_vec()
+            })
+            .collect();
 
-        for &key in &schedule.set_ids {
-            let conditions = core::mem::take(self.system_sets.get_conditions_mut(key).unwrap());
-            schedule.set_conditions.push(conditions);
-        }
+        schedule.systems = systems;
+        schedule.system_conditions = system_conditions;
+        schedule.set_conditions = set_conditions;
 
         Ok(())
     }
@@ -1370,7 +1363,7 @@ trait ProcessScheduleConfig: Schedulable + Sized {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId;
 }
 
-impl ProcessScheduleConfig for ScheduleSystem {
+impl ProcessScheduleConfig for SystemArc {
     fn process_config(schedule_graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId {
         NodeId::System(schedule_graph.add_system_inner(config))
     }
@@ -1400,7 +1393,7 @@ impl ScheduleGraph {
     fn get_node_name_inner(&self, id: &NodeId, report_sets: bool) -> String {
         match *id {
             NodeId::System(key) => {
-                let name = self.systems[key].name();
+                let name = self.systems[key].lock().name();
                 let name = if self.settings.use_shortnames {
                     name.shortname().to_string()
                 } else {

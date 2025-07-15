@@ -19,7 +19,7 @@ use crate::state::{StateTransitionEvent, States};
 /// ```
 /// use bevy_state::prelude::*;
 /// use bevy_ecs::prelude::*;
-/// use bevy_ecs::system::ScheduleSystem;
+/// use bevy_ecs::schedule::SystemArc;
 ///
 /// #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
 /// enum GameState {
@@ -42,7 +42,7 @@ use crate::state::{StateTransitionEvent, States};
 /// # struct AppMock;
 /// # impl AppMock {
 /// #     fn init_state<S>(&mut self) {}
-/// #     fn add_systems<S, M>(&mut self, schedule: S, systems: impl IntoScheduleConfigs<ScheduleSystem, M>) {}
+/// #     fn add_systems<S, M>(&mut self, schedule: S, systems: impl IntoScheduleConfigs<SystemArc, M>) {}
 /// # }
 /// # struct Update;
 /// # let mut app = AppMock;
@@ -97,7 +97,7 @@ pub fn despawn_entities_on_exit_state<S: States>(
 ///
 /// ```
 /// use bevy_state::prelude::*;
-/// use bevy_ecs::{prelude::*, system::ScheduleSystem};
+/// use bevy_ecs::{prelude::*, schedule::SystemArc};
 ///
 /// #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
 /// enum GameState {
@@ -120,7 +120,7 @@ pub fn despawn_entities_on_exit_state<S: States>(
 /// # struct AppMock;
 /// # impl AppMock {
 /// #     fn init_state<S>(&mut self) {}
-/// #     fn add_systems<S, M>(&mut self, schedule: S, systems: impl IntoScheduleConfigs<ScheduleSystem, M>) {}
+/// #     fn add_systems<S, M>(&mut self, schedule: S, systems: impl IntoScheduleConfigs<SystemArc, M>) {}
 /// # }
 /// # struct Update;
 /// # let mut app = AppMock;

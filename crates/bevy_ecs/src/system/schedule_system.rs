@@ -4,7 +4,7 @@ use crate::{
     component::{CheckChangeTicks, ComponentId, Tick},
     error::Result,
     query::FilteredAccessSet,
-    system::{input::SystemIn, BoxedSystem, RunSystemError, System, SystemInput},
+    system::{input::SystemIn, RunSystemError, System, SystemInput},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, FromWorld, World},
 };
 
@@ -206,6 +206,3 @@ where
         self.system.set_last_run(last_run);
     }
 }
-
-/// Type alias for a `BoxedSystem` that a `Schedule` can store.
-pub type ScheduleSystem = BoxedSystem<(), ()>;

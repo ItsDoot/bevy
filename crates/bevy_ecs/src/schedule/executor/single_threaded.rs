@@ -9,9 +9,7 @@ use std::eprintln;
 
 use crate::{
     error::{ErrorContext, ErrorHandler},
-    schedule::{
-        is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
-    },
+    schedule::{is_apply_deferred, ConditionArc, ExecutorKind, SystemExecutor, SystemSchedule},
     system::RunSystemError,
     world::World,
 };
@@ -108,14 +106,14 @@ impl SystemExecutor for SingleThreadedExecutor {
 
             should_run &= system_conditions_met;
 
-            let system = &mut schedule.systems[system_index].system;
+            let system = &schedule.systems[system_index];
 
             #[cfg(feature = "trace")]
             should_run_span.exit();
 
             #[cfg(feature = "hotpatching")]
             if should_update_hotpatch {
-                system.refresh_hotpatch();
+                system.lock().refresh_hotpatch();
             }
 
             // system has either been skipped or will run
@@ -125,14 +123,20 @@ impl SystemExecutor for SingleThreadedExecutor {
                 continue;
             }
 
-            if is_apply_deferred(&**system) {
-                self.apply_deferred(schedule, world);
-                continue;
+            {
+                if is_apply_deferred(&**system.lock()) {
+                    self.apply_deferred(schedule, world);
+                    continue;
+                }
             }
 
             let f = AssertUnwindSafe(|| {
+                let mut system = system.lock();
                 if let Err(RunSystemError::Failed(err)) =
-                    __rust_begin_short_backtrace::run_without_applying_deferred(system, world)
+                    __rust_begin_short_backtrace::run_without_applying_deferred(
+                        &mut **system,
+                        world,
+                    )
                 {
                     error_handler(
                         err,
@@ -148,7 +152,7 @@ impl SystemExecutor for SingleThreadedExecutor {
             #[expect(clippy::print_stderr, reason = "Allowed behind `std` feature gate.")]
             {
                 if let Err(payload) = std::panic::catch_unwind(f) {
-                    eprintln!("Encountered a panic in system `{}`!", system.name());
+                    eprintln!("Encountered a panic in system `{}`!", system.lock().name());
                     std::panic::resume_unwind(payload);
                 }
             }
@@ -188,8 +192,7 @@ impl SingleThreadedExecutor {
 
     fn apply_deferred(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
         for system_index in self.unapplied_systems.ones() {
-            let system = &mut schedule.systems[system_index].system;
-            system.apply_deferred(world);
+            schedule.systems[system_index].lock().apply_deferred(world);
         }
 
         self.unapplied_systems.clear();
@@ -197,7 +200,7 @@ impl SingleThreadedExecutor {
 }
 
 fn evaluate_and_fold_conditions(
-    conditions: &mut [ConditionWithAccess],
+    conditions: &mut [ConditionArc],
     world: &mut World,
     error_handler: ErrorHandler,
 ) -> bool {
@@ -213,7 +216,8 @@ fn evaluate_and_fold_conditions(
     )]
     conditions
         .iter_mut()
-        .map(|ConditionWithAccess { condition, .. }| {
+        .map(|condition| {
+            let mut condition = condition.lock();
             #[cfg(feature = "hotpatching")]
             if should_update_hotpatch {
                 condition.refresh_hotpatch();

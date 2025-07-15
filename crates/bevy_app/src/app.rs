@@ -14,8 +14,8 @@ use bevy_ecs::{
     event::{event_update_system, EventCursor},
     intern::Interned,
     prelude::*,
-    schedule::{InternedSystemSet, ScheduleBuildSettings, ScheduleLabel},
-    system::{IntoObserverSystem, ScheduleSystem, SystemId, SystemInput},
+    schedule::{InternedSystemSet, ScheduleBuildSettings, ScheduleLabel, SystemArc},
+    system::{IntoObserverSystem, SystemId, SystemInput},
 };
 use bevy_platform::collections::HashMap;
 use core::{fmt::Debug, num::NonZero, panic::AssertUnwindSafe};
@@ -307,7 +307,7 @@ impl App {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+        systems: impl IntoScheduleConfigs<SystemArc, M>,
     ) -> &mut Self {
         self.main_mut().add_systems(schedule, systems);
         self

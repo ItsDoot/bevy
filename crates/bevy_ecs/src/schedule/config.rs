@@ -1,27 +1,16 @@
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 use variadics_please::all_tuples;
 
 use crate::{
     schedule::{
         auto_insert_apply_deferred::IgnoreDeferred,
-        condition::{BoxedCondition, SystemCondition},
+        condition::SystemCondition,
         graph::{Ambiguity, Dependency, DependencyKind, GraphInfo},
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
-        Chain,
+        Chain, ConditionArc, SystemArc,
     },
-    system::{BoxedSystem, IntoSystem, ScheduleSystem, System},
+    system::IntoSystem,
 };
-
-fn new_condition<M>(condition: impl SystemCondition<M>) -> BoxedCondition {
-    let condition_system = IntoSystem::into_system(condition);
-    assert!(
-        condition_system.is_send(),
-        "SystemCondition `{}` accesses `NonSend` resources. This is not currently supported.",
-        condition_system.name()
-    );
-
-    Box::new(condition_system)
-}
 
 fn ambiguous_with(graph_info: &mut GraphInfo, set: InternedSystemSet) {
     match &mut graph_info.ambiguous_with {
@@ -48,12 +37,12 @@ pub trait Schedulable {
         Self: Sized;
 }
 
-impl Schedulable for ScheduleSystem {
+impl Schedulable for SystemArc {
     type Metadata = GraphInfo;
     type GroupMetadata = Chain;
 
     fn into_config(self) -> ScheduleConfig<Self> {
-        let sets = self.default_system_sets().clone();
+        let sets = self.lock().default_system_sets().clone();
         ScheduleConfig {
             node: self,
             metadata: GraphInfo {
@@ -92,7 +81,7 @@ impl Schedulable for InternedSystemSet {
 pub struct ScheduleConfig<T: Schedulable> {
     pub(crate) node: T,
     pub(crate) metadata: T::Metadata,
-    pub(crate) conditions: Vec<BoxedCondition>,
+    pub(crate) conditions: Vec<ConditionArc>,
 }
 
 /// Single or nested configurations for [`Schedulable`]s.
@@ -104,7 +93,7 @@ pub enum ScheduleConfigs<T: Schedulable> {
         /// Configuration for each element of the tuple.
         configs: Vec<ScheduleConfigs<T>>,
         /// Run conditions applied to everything in the tuple.
-        collective_conditions: Vec<BoxedCondition>,
+        collective_conditions: Vec<ConditionArc>,
         /// Metadata to be applied to all elements in the tuple.
         metadata: T::GroupMetadata,
     },
@@ -192,7 +181,7 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> ScheduleConfig
     fn distributive_run_if_inner<M>(&mut self, condition: impl SystemCondition<M> + Clone) {
         match self {
             Self::ScheduleConfig(config) => {
-                config.conditions.push(new_condition(condition));
+                config.conditions.push(SystemArc::new_readonly(condition));
             }
             Self::Configs { configs, .. } => {
                 for config in configs {
@@ -232,7 +221,7 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> ScheduleConfig
     ///
     /// This is useful if you have a run condition whose concrete type is unknown.
     /// Prefer `run_if` for run conditions whose type is known at compile time.
-    pub fn run_if_dyn(&mut self, condition: BoxedCondition) {
+    pub fn run_if_dyn(&mut self, condition: ConditionArc) {
         match self {
             Self::ScheduleConfig(config) => {
                 config.conditions.push(condition);
@@ -282,14 +271,14 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> ScheduleConfig
 /// # Examples
 ///
 /// ```
-/// # use bevy_ecs::{schedule::IntoScheduleConfigs, system::ScheduleSystem};
+/// # use bevy_ecs::schedule::{IntoScheduleConfigs, SystemArc};
 /// # struct AppMock;
 /// # struct Update;
 /// # impl AppMock {
 /// #     pub fn add_systems<M>(
 /// #         &mut self,
 /// #         schedule: Update,
-/// #         systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+/// #         systems: impl IntoScheduleConfigs<SystemArc, M>,
 /// #    ) -> &mut Self { self }
 /// # }
 /// # let mut app = AppMock;
@@ -534,7 +523,7 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> IntoScheduleCo
     }
 
     fn run_if<M>(mut self, condition: impl SystemCondition<M>) -> ScheduleConfigs<T> {
-        self.run_if_dyn(new_condition(condition));
+        self.run_if_dyn(SystemArc::new_readonly(condition));
         self
     }
 
@@ -558,19 +547,19 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> IntoScheduleCo
     }
 }
 
-impl<F, Marker> IntoScheduleConfigs<ScheduleSystem, Marker> for F
+impl<F, Marker> IntoScheduleConfigs<SystemArc, Marker> for F
 where
     F: IntoSystem<(), (), Marker>,
 {
-    fn into_configs(self) -> ScheduleConfigs<ScheduleSystem> {
-        let boxed_system = Box::new(IntoSystem::into_system(self));
-        ScheduleConfigs::ScheduleConfig(ScheduleSystem::into_config(boxed_system))
+    fn into_configs(self) -> ScheduleConfigs<SystemArc> {
+        let system_arc = SystemArc::new(IntoSystem::into_system(self));
+        ScheduleConfigs::ScheduleConfig(SystemArc::into_config(system_arc))
     }
 }
 
-impl IntoScheduleConfigs<ScheduleSystem, ()> for BoxedSystem<(), ()> {
-    fn into_configs(self) -> ScheduleConfigs<ScheduleSystem> {
-        ScheduleConfigs::ScheduleConfig(ScheduleSystem::into_config(self))
+impl IntoScheduleConfigs<SystemArc, ()> for SystemArc {
+    fn into_configs(self) -> ScheduleConfigs<SystemArc> {
+        ScheduleConfigs::ScheduleConfig(SystemArc::into_config(self))
     }
 }
 

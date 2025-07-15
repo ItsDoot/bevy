@@ -21,8 +21,7 @@ use crate::{
     prelude::{IntoSystemSet, SystemSet},
     query::FilteredAccessSet,
     schedule::{
-        ConditionWithAccess, InternedSystemSet, SystemKey, SystemSetKey, SystemTypeSet,
-        SystemWithAccess,
+        ConditionArc, InternedSystemSet, SystemArc, SystemKey, SystemSetKey, SystemTypeSet,
     },
     system::{RunSystemError, System, SystemIn, SystemParamValidationError, SystemStateFlags},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
@@ -78,9 +77,9 @@ pub struct SystemSchedule {
     /// List of system node ids.
     pub(super) system_ids: Vec<SystemKey>,
     /// Indexed by system node id.
-    pub(super) systems: Vec<SystemWithAccess>,
+    pub(super) systems: Vec<SystemArc>,
     /// Indexed by system node id.
-    pub(super) system_conditions: Vec<Vec<ConditionWithAccess>>,
+    pub(super) system_conditions: Vec<Vec<ConditionArc>>,
     /// Indexed by system node id.
     /// Number of systems that the system immediately depends on.
     #[cfg_attr(
@@ -101,7 +100,7 @@ pub struct SystemSchedule {
     /// List of system set node ids.
     pub(super) set_ids: Vec<SystemSetKey>,
     /// Indexed by system set node id.
-    pub(super) set_conditions: Vec<Vec<ConditionWithAccess>>,
+    pub(super) set_conditions: Vec<Vec<ConditionArc>>,
     /// Indexed by system set node id.
     /// List of systems that are in sets that have conditions.
     ///
@@ -249,7 +248,7 @@ mod __rust_begin_short_backtrace {
     use crate::world::unsafe_world_cell::UnsafeWorldCell;
     use crate::{
         error::Result,
-        system::{ReadOnlySystem, RunSystemError, ScheduleSystem},
+        system::{ReadOnlySystem, RunSystemError, System},
         world::World,
     };
 
@@ -259,7 +258,7 @@ mod __rust_begin_short_backtrace {
     #[cfg(feature = "std")]
     #[inline(never)]
     pub(super) unsafe fn run_unsafe(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: UnsafeWorldCell,
     ) -> Result<(), RunSystemError> {
         let result = system.run_unsafe((), world);
@@ -283,7 +282,7 @@ mod __rust_begin_short_backtrace {
 
     #[inline(never)]
     pub(super) fn run(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run((), world);
@@ -294,7 +293,7 @@ mod __rust_begin_short_backtrace {
 
     #[inline(never)]
     pub(super) fn run_without_applying_deferred(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run_without_applying_deferred((), world);

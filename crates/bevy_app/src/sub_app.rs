@@ -3,8 +3,10 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use bevy_ecs::{
     event::EventRegistry,
     prelude::*,
-    schedule::{InternedScheduleLabel, InternedSystemSet, ScheduleBuildSettings, ScheduleLabel},
-    system::{ScheduleSystem, SystemId, SystemInput},
+    schedule::{
+        InternedScheduleLabel, InternedSystemSet, ScheduleBuildSettings, ScheduleLabel, SystemArc,
+    },
+    system::{SystemId, SystemInput},
 };
 use bevy_platform::collections::{HashMap, HashSet};
 use core::fmt::Debug;
@@ -211,7 +213,7 @@ impl SubApp {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+        systems: impl IntoScheduleConfigs<SystemArc, M>,
     ) -> &mut Self {
         let mut schedules = self.world.resource_mut::<Schedules>();
         schedules.add_systems(schedule, systems);
