@@ -1,112 +1,34 @@
 use alloc::{sync::Arc, vec::Vec};
 use bevy_utils::prelude::DebugName;
-use core::ops::{DerefMut, Index, Range};
+use core::{
+    any::TypeId,
+    ops::{DerefMut, Index, Range},
+};
+use std::sync::OnceLock;
 
 use bevy_platform::{collections::HashMap, sync::Mutex};
 use slotmap::{new_key_type, SecondaryMap, SlotMap};
 
 use crate::{
-    component::{CheckChangeTicks, ComponentId, Tick},
-    prelude::{SystemIn, SystemSet},
+    component::ComponentId,
+    prelude::{ApplyDeferred, SystemSet},
     query::FilteredAccessSet,
     schedule::InternedSystemSet,
-    system::{
-        IntoSystem, ReadOnlySystem, RunSystemError, System, SystemParamValidationError,
-        SystemStateFlags,
-    },
-    world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
+    system::{IntoSystem, ReadOnlySystem, System, SystemStateFlags},
+    world::World,
 };
 
-/// A wrapper around a system that provides access to it and its access set.
-pub struct WithAccess<S: System + ?Sized> {
-    /// The access returned by [`System::initialize`](crate::system::System::initialize).
-    /// This will be empty if the system has not been initialized yet.
-    pub access: FilteredAccessSet<ComponentId>,
-    /// The system itself.
-    pub system: S,
-}
-
-impl<S: System> WithAccess<S> {
-    /// Constructs a new [`WithAccess`] from a [`System`].
-    /// The `access` will initially be empty.
-    pub fn new(system: S) -> Self {
-        Self {
-            access: FilteredAccessSet::new(),
-            system,
-        }
-    }
-}
-
-impl<S: System + ?Sized> System for WithAccess<S> {
-    type In = S::In;
-    type Out = S::Out;
-
-    #[inline]
-    fn name(&self) -> DebugName {
-        self.system.name()
-    }
-
-    #[inline]
-    fn flags(&self) -> SystemStateFlags {
-        self.system.flags()
-    }
-
-    #[inline]
-    unsafe fn run_unsafe(
-        &mut self,
-        input: SystemIn<'_, Self>,
-        world: UnsafeWorldCell,
-    ) -> Result<Self::Out, RunSystemError> {
-        self.system.run_unsafe(input, world)
-    }
-
-    #[inline]
-    fn apply_deferred(&mut self, world: &mut World) {
-        self.system.apply_deferred(world);
-    }
-
-    #[inline]
-    fn queue_deferred(&mut self, world: DeferredWorld) {
-        self.system.queue_deferred(world);
-    }
-
-    #[inline]
-    unsafe fn validate_param_unsafe(
-        &mut self,
-        world: UnsafeWorldCell,
-    ) -> Result<(), SystemParamValidationError> {
-        self.system.validate_param_unsafe(world)
-    }
-
-    #[inline]
-    fn initialize(&mut self, world: &mut World) -> FilteredAccessSet<ComponentId> {
-        self.access = self.system.initialize(world);
-        self.access.clone()
-    }
-
-    #[inline]
-    fn check_change_tick(&mut self, check: CheckChangeTicks) {
-        self.system.check_change_tick(check);
-    }
-
-    #[inline]
-    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
-        self.system.default_system_sets()
-    }
-
-    #[inline]
-    fn get_last_run(&self) -> Tick {
-        self.system.get_last_run()
-    }
-
-    #[inline]
-    fn set_last_run(&mut self, last_run: Tick) {
-        self.system.set_last_run(last_run);
-    }
-}
-
 /// A wrapper around a system that provides access to it via an `Arc<Mutex<_>>`.
-pub struct SystemArc<S: System + ?Sized = dyn System<In = (), Out = ()>>(Arc<Mutex<WithAccess<S>>>);
+pub struct SystemArc<S: System + ?Sized = dyn System<In = (), Out = ()>>(Arc<SystemArcInner<S>>);
+
+struct SystemArcInner<S: System + ?Sized> {
+    name: DebugName,
+    flags: SystemStateFlags,
+    type_id: TypeId,
+    access: OnceLock<FilteredAccessSet<ComponentId>>,
+    /// The system wrapped in a mutex for safe concurrent access.
+    system: Mutex<S>,
+}
 
 /// A wrapper around a condition that provides access to it via an `Arc<Mutex<_>>`.
 pub type ConditionArc<In = ()> = SystemArc<dyn ReadOnlySystem<In = In, Out = bool>>;
@@ -116,9 +38,15 @@ impl<S: System> SystemArc<S> {
     pub fn new<M>(
         system: impl IntoSystem<S::In, S::Out, M, System = S>,
     ) -> SystemArc<dyn System<In = S::In, Out = S::Out>> {
-        SystemArc(Arc::new(Mutex::new(WithAccess::new(
-            IntoSystem::into_system(system),
-        ))))
+        let system = IntoSystem::into_system(system);
+        let inner = SystemArcInner {
+            name: system.name(),
+            flags: system.flags(),
+            type_id: system.type_id(),
+            access: OnceLock::new(),
+            system: Mutex::new(system),
+        };
+        SystemArc(Arc::new(inner))
     }
 }
 
@@ -127,22 +55,90 @@ impl<S: ReadOnlySystem> SystemArc<S> {
     pub fn new_readonly<M>(
         system: impl IntoSystem<S::In, S::Out, M, System = S>,
     ) -> SystemArc<dyn ReadOnlySystem<In = S::In, Out = S::Out>> {
-        SystemArc(Arc::new(Mutex::new(WithAccess::new(
-            IntoSystem::into_system(system),
-        ))))
+        let system = IntoSystem::into_system(system);
+        let inner = SystemArcInner {
+            name: system.name(),
+            flags: system.flags(),
+            type_id: system.type_id(),
+            access: OnceLock::new(),
+            system: Mutex::new(system),
+        };
+        SystemArc(Arc::new(inner))
     }
 }
 
 impl<S: System + ?Sized> SystemArc<S> {
-    /// Initializes the system and stores its access.
-    pub fn initialize(&self, world: &mut World) {
-        let mut system = self.lock();
-        system.access = system.system.initialize(world);
+    /// Returns this system's name.
+    #[inline]
+    pub fn name(&self) -> &DebugName {
+        &self.0.name
     }
 
-    /// Acquires a lock on the system, allowing access to it.
-    pub fn lock(&self) -> impl DerefMut<Target = WithAccess<S>> + '_ {
-        self.0.try_lock().unwrap()
+    /// Returns the [`SystemStateFlags`] of this system.
+    #[inline]
+    pub fn flags(&self) -> SystemStateFlags {
+        self.0.flags
+    }
+
+    /// Returns true if this system is [`Send`].
+    #[inline]
+    pub fn is_send(&self) -> bool {
+        !self.flags().intersects(SystemStateFlags::NON_SEND)
+    }
+
+    /// Returns true if this system must be run exclusively.
+    #[inline]
+    pub fn is_exclusive(&self) -> bool {
+        self.flags().intersects(SystemStateFlags::EXCLUSIVE)
+    }
+
+    /// Returns true if this system has deferred buffers.
+    #[inline]
+    pub fn has_deferred(&self) -> bool {
+        self.flags().intersects(SystemStateFlags::DEFERRED)
+    }
+
+    /// Returns the [`TypeId`] of this system's underlying type.
+    #[inline]
+    pub fn type_id(&self) -> TypeId {
+        self.0.type_id
+    }
+
+    /// Returns `true` if this [`System`] is an instance of [`ApplyDeferred`].
+    #[inline]
+    pub fn is_apply_deferred(&self) -> bool {
+        self.type_id() == TypeId::of::<ApplyDeferred>()
+    }
+
+    /// Returns the [`FilteredAccessSet`] of this system, panicking if it has
+    /// not been initialized yet.
+    ///
+    /// # Panics
+    ///
+    /// If the system has not been initialized yet, this will panic.
+    pub fn access(&self) -> &FilteredAccessSet<ComponentId> {
+        self.0
+            .access
+            .get()
+            .expect("System access has not been initialized yet. Call `initialize` first.")
+    }
+
+    /// Returns the [`FilteredAccessSet`] of this system, or `None` if it has
+    /// not been initialized yet.
+    pub fn get_access(&self) -> Option<&FilteredAccessSet<ComponentId>> {
+        self.0.access.get()
+    }
+
+    /// Initializes this system and stores its access.
+    pub fn initialize(&self, world: &mut World) -> &FilteredAccessSet<ComponentId> {
+        self.0
+            .access
+            .get_or_init(|| self.0.system.try_lock().unwrap().initialize(world))
+    }
+
+    /// Acquires a lock on this system, allowing access to it's [`System`].
+    pub fn lock(&self) -> impl DerefMut<Target = S> + '_ {
+        self.0.system.try_lock().unwrap()
     }
 }
 
@@ -241,10 +237,18 @@ impl Systems {
         for key in self.uninit.drain(..) {
             if let Some(system) = self.nodes.get(key) {
                 system.initialize(world);
+                assert!(
+                    system.get_access().is_some(),
+                    "System access should be initialized after calling `initialize`."
+                );
             }
             if let Some(conditions) = self.conditions.get(key) {
                 for condition in conditions {
                     condition.initialize(world);
+                    assert!(
+                        condition.get_access().is_some(),
+                        "Condition access should be initialized after calling `initialize`."
+                    );
                 }
             }
         }

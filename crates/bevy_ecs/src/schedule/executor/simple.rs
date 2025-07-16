@@ -11,10 +11,8 @@ use std::eprintln;
 
 use crate::{
     error::{ErrorContext, ErrorHandler},
-    schedule::{
-        executor::is_apply_deferred, ConditionArc, ExecutorKind, SystemExecutor, SystemSchedule,
-    },
-    system::{RunSystemError, System},
+    schedule::{ConditionArc, ExecutorKind, SystemExecutor, SystemSchedule},
+    system::RunSystemError,
     world::World,
 };
 #[cfg(feature = "hotpatching")]
@@ -106,7 +104,7 @@ impl SystemExecutor for SimpleExecutor {
 
             should_run &= system_conditions_met;
 
-            let mut system = schedule.systems[system_index].lock();
+            let system = &schedule.systems[system_index];
 
             #[cfg(feature = "trace")]
             should_run_span.exit();
@@ -123,13 +121,14 @@ impl SystemExecutor for SimpleExecutor {
                 continue;
             }
 
-            if is_apply_deferred(&system.system) {
+            if system.is_apply_deferred() {
                 continue;
             }
 
             let f = AssertUnwindSafe(|| {
+                let mut system = system.lock();
                 if let Err(RunSystemError::Failed(err)) =
-                    __rust_begin_short_backtrace::run(&mut system.system, world)
+                    __rust_begin_short_backtrace::run(&mut *system, world)
                 {
                     error_handler(
                         err,
@@ -202,7 +201,7 @@ fn evaluate_and_fold_conditions(
             if should_update_hotpatch {
                 condition.refresh_hotpatch();
             }
-            __rust_begin_short_backtrace::readonly_run(&mut condition.system, world).unwrap_or_else(
+            __rust_begin_short_backtrace::readonly_run(&mut *condition, world).unwrap_or_else(
                 |err| {
                     if let RunSystemError::Failed(err) = err {
                         error_handler(

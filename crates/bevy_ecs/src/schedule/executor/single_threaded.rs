@@ -9,8 +9,8 @@ use std::eprintln;
 
 use crate::{
     error::{ErrorContext, ErrorHandler},
-    schedule::{is_apply_deferred, ConditionArc, ExecutorKind, SystemExecutor, SystemSchedule},
-    system::{RunSystemError, System},
+    schedule::{ConditionArc, ExecutorKind, SystemExecutor, SystemSchedule},
+    system::RunSystemError,
     world::World,
 };
 #[cfg(feature = "hotpatching")]
@@ -113,7 +113,7 @@ impl SystemExecutor for SingleThreadedExecutor {
 
             #[cfg(feature = "hotpatching")]
             if should_update_hotpatch {
-                system.lock().refresh_hotpatch();
+                system.refresh_hotpatch();
             }
 
             // system has either been skipped or will run
@@ -123,7 +123,7 @@ impl SystemExecutor for SingleThreadedExecutor {
                 continue;
             }
 
-            if is_apply_deferred(&system.lock().system) {
+            if system.is_apply_deferred() {
                 self.apply_deferred(schedule, world);
                 continue;
             }
@@ -131,10 +131,7 @@ impl SystemExecutor for SingleThreadedExecutor {
             let f = AssertUnwindSafe(|| {
                 let mut system = system.lock();
                 if let Err(RunSystemError::Failed(err)) =
-                    __rust_begin_short_backtrace::run_without_applying_deferred(
-                        &mut system.system,
-                        world,
-                    )
+                    __rust_begin_short_backtrace::run_without_applying_deferred(&mut *system, world)
                 {
                     error_handler(
                         err,
@@ -150,7 +147,7 @@ impl SystemExecutor for SingleThreadedExecutor {
             #[expect(clippy::print_stderr, reason = "Allowed behind `std` feature gate.")]
             {
                 if let Err(payload) = std::panic::catch_unwind(f) {
-                    eprintln!("Encountered a panic in system `{}`!", system.lock().name());
+                    eprintln!("Encountered a panic in system `{}`!", system.name());
                     std::panic::resume_unwind(payload);
                 }
             }
@@ -220,7 +217,7 @@ fn evaluate_and_fold_conditions(
             if should_update_hotpatch {
                 condition.refresh_hotpatch();
             }
-            __rust_begin_short_backtrace::readonly_run(&mut condition.system, world).unwrap_or_else(
+            __rust_begin_short_backtrace::readonly_run(&mut *condition, world).unwrap_or_else(
                 |err| {
                     if let RunSystemError::Failed(err) = err {
                         error_handler(

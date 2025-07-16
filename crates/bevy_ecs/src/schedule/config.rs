@@ -9,7 +9,7 @@ use crate::{
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
         Chain, ConditionArc, SystemArc,
     },
-    system::{IntoSystem, System},
+    system::IntoSystem,
 };
 
 fn ambiguous_with(graph_info: &mut GraphInfo, set: InternedSystemSet) {

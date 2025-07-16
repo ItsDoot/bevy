@@ -23,7 +23,7 @@ use thiserror::Error;
 #[cfg(feature = "trace")]
 use tracing::info_span;
 
-use crate::{component::CheckChangeTicks, system::System};
+use crate::component::CheckChangeTicks;
 use crate::{
     component::{ComponentId, Components},
     prelude::Component,
@@ -546,9 +546,8 @@ impl Schedule {
     /// This prevents overflow and thus prevents false positives.
     pub fn check_change_ticks(&mut self, check: CheckChangeTicks) {
         for system in &self.executable.systems {
-            let mut system = system.lock();
-            if !is_apply_deferred(&system.system) {
-                system.check_change_tick(check);
+            if !system.is_apply_deferred() {
+                system.lock().check_change_tick(check);
             }
         }
 
@@ -1159,13 +1158,13 @@ impl ScheduleGraph {
                     "Encountered a non-system node in the flattened disconnected results: {b:?}"
                 );
             };
-            let system_a = self.systems[a].lock();
-            let system_b = self.systems[b].lock();
+            let system_a = &self.systems[a];
+            let system_b = &self.systems[b];
             if system_a.is_exclusive() || system_b.is_exclusive() {
                 conflicting_systems.push((a, b, Vec::new()));
             } else {
-                let access_a = &system_a.access;
-                let access_b = &system_b.access;
+                let access_a = system_a.access();
+                let access_b = system_b.access();
                 if !access_a.is_compatible(access_b) {
                     match access_a.get_conflicts(access_b) {
                         AccessConflicts::Individual(conflicts) => {

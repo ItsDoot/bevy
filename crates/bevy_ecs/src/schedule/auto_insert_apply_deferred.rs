@@ -4,13 +4,13 @@ use bevy_platform::collections::HashMap;
 
 use crate::{
     schedule::{SystemArc, SystemKey, SystemSetKey},
-    system::{IntoSystem, System},
+    system::IntoSystem,
     world::World,
 };
 
 use super::{
-    is_apply_deferred, ApplyDeferred, DiGraph, Direction, NodeId, ReportCycles, ScheduleBuildError,
-    ScheduleBuildPass, ScheduleGraph,
+    ApplyDeferred, DiGraph, Direction, NodeId, ReportCycles, ScheduleBuildError, ScheduleBuildPass,
+    ScheduleGraph,
 };
 
 /// A [`ScheduleBuildPass`] that inserts [`ApplyDeferred`] systems into the schedule graph
@@ -107,7 +107,7 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
 
         let mut system_has_conditions_cache = HashMap::<SystemKey, bool>::default();
         let mut is_valid_explicit_sync_point = |key: SystemKey| {
-            is_apply_deferred(&graph.systems[key].lock().system)
+            graph.systems[key].is_apply_deferred()
                 && !*system_has_conditions_cache
                     .entry(key)
                     .or_insert_with(|| system_has_conditions(graph, key))
@@ -209,12 +209,10 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
                     continue;
                 }
 
-                {
-                    if is_apply_deferred(&graph.systems[target].lock().system) {
-                        // We don't need to insert a sync point since ApplyDeferred is a sync point
-                        // already!
-                        continue;
-                    }
+                if graph.systems[target].is_apply_deferred() {
+                    // We don't need to insert a sync point since ApplyDeferred is a sync point
+                    // already!
+                    continue;
                 }
 
                 let sync_point = distance_to_explicit_sync_node

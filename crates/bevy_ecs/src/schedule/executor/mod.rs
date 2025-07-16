@@ -5,7 +5,6 @@ mod single_threaded;
 
 use alloc::{vec, vec::Vec};
 use bevy_utils::prelude::DebugName;
-use core::any::TypeId;
 
 #[expect(deprecated, reason = "We still need to support this.")]
 pub use self::{simple::SimpleExecutor, single_threaded::SingleThreadedExecutor};
@@ -151,11 +150,6 @@ impl SystemSchedule {
 /// [`Schedule`]: super::Schedule
 #[doc(alias = "apply_system_buffers")]
 pub struct ApplyDeferred;
-
-/// Returns `true` if the [`System`] is an instance of [`ApplyDeferred`].
-pub(super) fn is_apply_deferred(system: &dyn System<In = (), Out = ()>) -> bool {
-    system.type_id() == TypeId::of::<ApplyDeferred>()
-}
 
 impl System for ApplyDeferred {
     type In = ();
