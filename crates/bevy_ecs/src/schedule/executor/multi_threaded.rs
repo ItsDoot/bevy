@@ -168,7 +168,7 @@ impl SystemExecutor for MultiThreadedExecutor {
 
         state.system_task_metadata = Vec::with_capacity(sys_count);
         for index in 0..sys_count {
-            let system = schedule.systems[index].lock();
+            let system = &schedule.systems[index];
             state.system_task_metadata.push(SystemTaskMetadata {
                 conflicting_systems: FixedBitSet::with_capacity(sys_count),
                 condition_conflicting_systems: FixedBitSet::with_capacity(sys_count),
@@ -185,9 +185,17 @@ impl SystemExecutor for MultiThreadedExecutor {
             #[cfg(feature = "trace")]
             let _span = info_span!("calculate conflicting systems").entered();
             for index1 in 0..sys_count {
-                let system1_access = schedule.systems[index1].access();
+                let system1 = &schedule.systems[index1];
+                if system1.is_apply_deferred() {
+                    continue;
+                }
+                let system1_access = system1.access();
+
                 for index2 in 0..index1 {
                     let system2 = &schedule.systems[index2];
+                    if system2.is_apply_deferred() {
+                        continue;
+                    }
                     if !system2.access().is_compatible(system1_access) {
                         state.system_task_metadata[index1]
                             .conflicting_systems
@@ -199,7 +207,11 @@ impl SystemExecutor for MultiThreadedExecutor {
                 }
 
                 for index2 in 0..sys_count {
-                    let system2_access = schedule.systems[index2].access();
+                    let system2 = &schedule.systems[index2];
+                    if system2.is_apply_deferred() {
+                        continue;
+                    }
+                    let system2_access = system2.access();
                     if schedule.system_conditions[index1]
                         .iter()
                         .any(|condition| !system2_access.is_compatible(condition.access()))
@@ -668,8 +680,8 @@ impl ExecutorState {
         let system_meta = &self.system_task_metadata[system_index];
 
         let task = async move {
-            let mut sys = system.lock();
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let mut sys = system.lock();
                 // SAFETY:
                 // - The caller ensures that we have permission to
                 // access the world data used by the system.
@@ -728,8 +740,8 @@ impl ExecutorState {
                 // SAFETY: `can_run` returned true for this system, which means
                 // that no other systems currently have access to the world.
                 let world = unsafe { context.environment.world_cell.world_mut() };
-                let mut sys = system.lock();
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    let mut sys = system.lock();
                     if let Err(RunSystemError::Failed(err)) =
                         __rust_begin_short_backtrace::run(&mut *sys, world)
                     {
@@ -796,9 +808,9 @@ fn apply_deferred(
 ) -> Result<(), Box<dyn Any + Send>> {
     for system_index in unapplied_systems.ones() {
         // SAFETY: none of these systems are running, no other references exist
-        let mut system = systems[system_index].lock();
+        let system = &systems[system_index];
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            system.apply_deferred(world);
+            system.lock().apply_deferred(world);
         }));
         if let Err(payload) = res {
             #[cfg(feature = "std")]

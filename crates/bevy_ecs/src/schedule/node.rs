@@ -4,7 +4,7 @@ use core::{
     any::TypeId,
     ops::{DerefMut, Index, Range},
 };
-use std::sync::OnceLock;
+use std::sync::{OnceLock, PoisonError};
 
 use bevy_platform::{collections::HashMap, sync::Mutex};
 use slotmap::{new_key_type, SecondaryMap, SlotMap};
@@ -117,10 +117,12 @@ impl<S: System + ?Sized> SystemArc<S> {
     ///
     /// If the system has not been initialized yet, this will panic.
     pub fn access(&self) -> &FilteredAccessSet<ComponentId> {
-        self.0
-            .access
-            .get()
-            .expect("System access has not been initialized yet. Call `initialize` first.")
+        self.0.access.get().unwrap_or_else(|| {
+            panic!(
+                "System access for {:?} has not been initialized yet. Call `initialize` first.",
+                self.name()
+            )
+        })
     }
 
     /// Returns the [`FilteredAccessSet`] of this system, or `None` if it has
@@ -138,7 +140,7 @@ impl<S: System + ?Sized> SystemArc<S> {
 
     /// Acquires a lock on this system, allowing access to it's [`System`].
     pub fn lock(&self) -> impl DerefMut<Target = S> + '_ {
-        self.0.system.try_lock().unwrap()
+        self.0.system.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

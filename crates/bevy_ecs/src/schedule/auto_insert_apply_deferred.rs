@@ -147,7 +147,7 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
             } else if !node_needs_sync {
                 // No previous node has postponed sync points to add so check if the system itself
                 // has deferred params that require a sync point to apply them.
-                node_needs_sync = graph.systems[key].lock().has_deferred();
+                node_needs_sync = graph.systems[key].has_deferred();
             }
 
             for target in dependency_flattened.neighbors_directed(*node, Direction::Outgoing) {
@@ -159,7 +159,7 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
 
                 let mut edge_needs_sync = node_needs_sync;
                 if node_needs_sync
-                    && !graph.systems[target].lock().is_exclusive()
+                    && !graph.systems[target].is_exclusive()
                     && self
                         .no_sync_edges
                         .contains(&(*node, NodeId::System(target)))

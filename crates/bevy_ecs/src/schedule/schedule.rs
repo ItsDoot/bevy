@@ -1392,7 +1392,7 @@ impl ScheduleGraph {
     fn get_node_name_inner(&self, id: &NodeId, report_sets: bool) -> String {
         match *id {
             NodeId::System(key) => {
-                let name = self.systems[key].lock().name();
+                let name = self.systems[key].name();
                 let name = if self.settings.use_shortnames {
                     name.shortname().to_string()
                 } else {
