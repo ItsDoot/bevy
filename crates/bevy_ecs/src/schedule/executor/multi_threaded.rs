@@ -493,7 +493,7 @@ impl ExecutorState {
                 if unsafe {
                     !self.should_run(
                         system_index,
-                        &mut **system,
+                        &mut system.system,
                         conditions,
                         context.environment.world_cell,
                         context.error_handler,
@@ -680,7 +680,7 @@ impl ExecutorState {
                 unsafe {
                     if let Err(RunSystemError::Failed(err)) =
                         __rust_begin_short_backtrace::run_unsafe(
-                            &mut **system,
+                            &mut system.system,
                             context.environment.world_cell,
                         )
                     {
@@ -694,7 +694,7 @@ impl ExecutorState {
                     }
                 };
             }));
-            context.system_completed(system_index, res, &**system);
+            context.system_completed(system_index, res, &system.system);
         };
 
         if system_meta.is_send {
@@ -713,7 +713,7 @@ impl ExecutorState {
         // Move the full context object into the new future.
         let context = *context;
 
-        if is_apply_deferred(&**system.lock()) {
+        if is_apply_deferred(&system.lock().system) {
             // TODO: avoid allocation
             let unapplied_systems = self.unapplied_systems.clone();
             self.unapplied_systems.clear();
@@ -722,7 +722,7 @@ impl ExecutorState {
                 // that no other systems currently have access to the world.
                 let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = apply_deferred(&unapplied_systems, context.environment.systems, world);
-                context.system_completed(system_index, res, &**system.lock());
+                context.system_completed(system_index, res, &system.lock().system);
             };
 
             context.scope.spawn_on_scope(task);
@@ -734,7 +734,7 @@ impl ExecutorState {
                 let mut system = system.lock();
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
                     if let Err(RunSystemError::Failed(err)) =
-                        __rust_begin_short_backtrace::run(&mut **system, world)
+                        __rust_begin_short_backtrace::run(&mut system.system, world)
                     {
                         (context.error_handler)(
                             err,
@@ -745,7 +745,7 @@ impl ExecutorState {
                         );
                     }
                 }));
-                context.system_completed(system_index, res, &**system);
+                context.system_completed(system_index, res, &system.system);
             };
 
             context.scope.spawn_on_scope(task);
@@ -845,7 +845,10 @@ unsafe fn evaluate_and_fold_conditions(
                     //   required by the condition.
                     // - `update_archetype_component_access` has been called for condition.
                     unsafe {
-                        __rust_begin_short_backtrace::readonly_run_unsafe(&mut **condition, world)
+                        __rust_begin_short_backtrace::readonly_run_unsafe(
+                            &mut condition.system,
+                            world,
+                        )
                     }
                 })
                 .unwrap_or_else(|err| {

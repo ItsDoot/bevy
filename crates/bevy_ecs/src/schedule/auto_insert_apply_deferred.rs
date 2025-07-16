@@ -4,7 +4,7 @@ use bevy_platform::collections::HashMap;
 
 use crate::{
     schedule::{SystemArc, SystemKey, SystemSetKey},
-    system::IntoSystem,
+    system::{IntoSystem, System},
     world::World,
 };
 
@@ -107,7 +107,7 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
 
         let mut system_has_conditions_cache = HashMap::<SystemKey, bool>::default();
         let mut is_valid_explicit_sync_point = |key: SystemKey| {
-            is_apply_deferred(&**graph.systems[key].lock())
+            is_apply_deferred(&graph.systems[key].lock().system)
                 && !*system_has_conditions_cache
                     .entry(key)
                     .or_insert_with(|| system_has_conditions(graph, key))
@@ -210,7 +210,7 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
                 }
 
                 {
-                    if is_apply_deferred(&**graph.systems[target].lock()) {
+                    if is_apply_deferred(&graph.systems[target].lock().system) {
                         // We don't need to insert a sync point since ApplyDeferred is a sync point
                         // already!
                         continue;

@@ -14,7 +14,7 @@ use crate::{
     schedule::{
         executor::is_apply_deferred, ConditionArc, ExecutorKind, SystemExecutor, SystemSchedule,
     },
-    system::RunSystemError,
+    system::{RunSystemError, System},
     world::World,
 };
 #[cfg(feature = "hotpatching")]
@@ -123,13 +123,13 @@ impl SystemExecutor for SimpleExecutor {
                 continue;
             }
 
-            if is_apply_deferred(&**system) {
+            if is_apply_deferred(&system.system) {
                 continue;
             }
 
             let f = AssertUnwindSafe(|| {
                 if let Err(RunSystemError::Failed(err)) =
-                    __rust_begin_short_backtrace::run(&mut **system, world)
+                    __rust_begin_short_backtrace::run(&mut system.system, world)
                 {
                     error_handler(
                         err,
@@ -202,7 +202,7 @@ fn evaluate_and_fold_conditions(
             if should_update_hotpatch {
                 condition.refresh_hotpatch();
             }
-            __rust_begin_short_backtrace::readonly_run(&mut **condition, world).unwrap_or_else(
+            __rust_begin_short_backtrace::readonly_run(&mut condition.system, world).unwrap_or_else(
                 |err| {
                     if let RunSystemError::Failed(err) = err {
                         error_handler(

@@ -9,7 +9,7 @@ use crate::{
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
         Chain, ConditionArc, SystemArc,
     },
-    system::IntoSystem,
+    system::{IntoSystem, System},
 };
 
 fn ambiguous_with(graph_info: &mut GraphInfo, set: InternedSystemSet) {
@@ -42,7 +42,7 @@ impl Schedulable for SystemArc {
     type GroupMetadata = Chain;
 
     fn into_config(self) -> ScheduleConfig<Self> {
-        let sets = self.lock().default_system_sets().clone();
+        let sets = self.lock().default_system_sets();
         ScheduleConfig {
             node: self,
             metadata: GraphInfo {

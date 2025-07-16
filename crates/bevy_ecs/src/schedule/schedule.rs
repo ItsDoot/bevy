@@ -23,7 +23,7 @@ use thiserror::Error;
 #[cfg(feature = "trace")]
 use tracing::info_span;
 
-use crate::component::CheckChangeTicks;
+use crate::{component::CheckChangeTicks, system::System};
 use crate::{
     component::{ComponentId, Components},
     prelude::Component,
@@ -547,7 +547,7 @@ impl Schedule {
     pub fn check_change_ticks(&mut self, check: CheckChangeTicks) {
         for system in &self.executable.systems {
             let mut system = system.lock();
-            if !is_apply_deferred(&**system) {
+            if !is_apply_deferred(&system.system) {
                 system.check_change_tick(check);
             }
         }

@@ -1,19 +1,20 @@
 use alloc::{sync::Arc, vec::Vec};
-use core::ops::{Deref, DerefMut, Index, Range};
+use bevy_utils::prelude::DebugName;
+use core::ops::{DerefMut, Index, Range};
 
-use bevy_platform::{
-    collections::HashMap,
-    sync::{Mutex, PoisonError},
-};
+use bevy_platform::{collections::HashMap, sync::Mutex};
 use slotmap::{new_key_type, SecondaryMap, SlotMap};
 
 use crate::{
-    component::ComponentId,
-    prelude::SystemSet,
+    component::{CheckChangeTicks, ComponentId, Tick},
+    prelude::{SystemIn, SystemSet},
     query::FilteredAccessSet,
     schedule::InternedSystemSet,
-    system::{IntoSystem, ReadOnlySystem, System},
-    world::World,
+    system::{
+        IntoSystem, ReadOnlySystem, RunSystemError, System, SystemParamValidationError,
+        SystemStateFlags,
+    },
+    world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
 /// A wrapper around a system that provides access to it and its access set.
@@ -34,24 +35,73 @@ impl<S: System> WithAccess<S> {
             system,
         }
     }
+}
 
-    /// Initializes this system and stores its access.
-    pub fn initialize(&mut self, world: &mut World) {
+impl<S: System + ?Sized> System for WithAccess<S> {
+    type In = S::In;
+    type Out = S::Out;
+
+    #[inline]
+    fn name(&self) -> DebugName {
+        self.system.name()
+    }
+
+    #[inline]
+    fn flags(&self) -> SystemStateFlags {
+        self.system.flags()
+    }
+
+    #[inline]
+    unsafe fn run_unsafe(
+        &mut self,
+        input: SystemIn<'_, Self>,
+        world: UnsafeWorldCell,
+    ) -> Result<Self::Out, RunSystemError> {
+        self.system.run_unsafe(input, world)
+    }
+
+    #[inline]
+    fn apply_deferred(&mut self, world: &mut World) {
+        self.system.apply_deferred(world);
+    }
+
+    #[inline]
+    fn queue_deferred(&mut self, world: DeferredWorld) {
+        self.system.queue_deferred(world);
+    }
+
+    #[inline]
+    unsafe fn validate_param_unsafe(
+        &mut self,
+        world: UnsafeWorldCell,
+    ) -> Result<(), SystemParamValidationError> {
+        self.system.validate_param_unsafe(world)
+    }
+
+    #[inline]
+    fn initialize(&mut self, world: &mut World) -> FilteredAccessSet<ComponentId> {
         self.access = self.system.initialize(world);
+        self.access.clone()
     }
-}
 
-impl<S: System + ?Sized> Deref for WithAccess<S> {
-    type Target = S;
-
-    fn deref(&self) -> &Self::Target {
-        &self.system
+    #[inline]
+    fn check_change_tick(&mut self, check: CheckChangeTicks) {
+        self.system.check_change_tick(check);
     }
-}
 
-impl<S: System + ?Sized> DerefMut for WithAccess<S> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.system
+    #[inline]
+    fn default_system_sets(&self) -> Vec<InternedSystemSet> {
+        self.system.default_system_sets()
+    }
+
+    #[inline]
+    fn get_last_run(&self) -> Tick {
+        self.system.get_last_run()
+    }
+
+    #[inline]
+    fn set_last_run(&mut self, last_run: Tick) {
+        self.system.set_last_run(last_run);
     }
 }
 
@@ -92,7 +142,7 @@ impl<S: System + ?Sized> SystemArc<S> {
 
     /// Acquires a lock on the system, allowing access to it.
     pub fn lock(&self) -> impl DerefMut<Target = WithAccess<S>> + '_ {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.0.try_lock().unwrap()
     }
 }
 

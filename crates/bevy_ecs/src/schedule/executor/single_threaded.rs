@@ -10,7 +10,7 @@ use std::eprintln;
 use crate::{
     error::{ErrorContext, ErrorHandler},
     schedule::{is_apply_deferred, ConditionArc, ExecutorKind, SystemExecutor, SystemSchedule},
-    system::RunSystemError,
+    system::{RunSystemError, System},
     world::World,
 };
 #[cfg(feature = "hotpatching")]
@@ -123,18 +123,16 @@ impl SystemExecutor for SingleThreadedExecutor {
                 continue;
             }
 
-            {
-                if is_apply_deferred(&**system.lock()) {
-                    self.apply_deferred(schedule, world);
-                    continue;
-                }
+            if is_apply_deferred(&system.lock().system) {
+                self.apply_deferred(schedule, world);
+                continue;
             }
 
             let f = AssertUnwindSafe(|| {
                 let mut system = system.lock();
                 if let Err(RunSystemError::Failed(err)) =
                     __rust_begin_short_backtrace::run_without_applying_deferred(
-                        &mut **system,
+                        &mut system.system,
                         world,
                     )
                 {
@@ -222,7 +220,7 @@ fn evaluate_and_fold_conditions(
             if should_update_hotpatch {
                 condition.refresh_hotpatch();
             }
-            __rust_begin_short_backtrace::readonly_run(&mut **condition, world).unwrap_or_else(
+            __rust_begin_short_backtrace::readonly_run(&mut condition.system, world).unwrap_or_else(
                 |err| {
                     if let RunSystemError::Failed(err) = err {
                         error_handler(
