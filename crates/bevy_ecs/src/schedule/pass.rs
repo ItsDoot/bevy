@@ -3,7 +3,7 @@ use core::any::{Any, TypeId};
 
 use super::{DiGraph, NodeId, ScheduleBuildError, ScheduleGraph};
 use crate::{
-    schedule::{SystemKey, SystemSetKey},
+    schedule::{graph::SortedDag, SystemKey, SystemSetKey},
     world::World,
 };
 use bevy_utils::TypeIdMap;
@@ -32,7 +32,7 @@ pub trait ScheduleBuildPass: Send + Sync + Debug + 'static {
         &mut self,
         world: &mut World,
         graph: &mut ScheduleGraph,
-        dependency_flattened: &mut DiGraph<SystemKey>,
+        flat_dependency: SortedDag<SystemKey>,
     ) -> Result<(), ScheduleBuildError>;
 }
 
@@ -42,7 +42,7 @@ pub(super) trait ScheduleBuildPassObj: Send + Sync + Debug {
         &mut self,
         world: &mut World,
         graph: &mut ScheduleGraph,
-        dependency_flattened: &mut DiGraph<SystemKey>,
+        flat_dependency: SortedDag<SystemKey>,
     ) -> Result<(), ScheduleBuildError>;
 
     fn collapse_set(
@@ -60,9 +60,9 @@ impl<T: ScheduleBuildPass> ScheduleBuildPassObj for T {
         &mut self,
         world: &mut World,
         graph: &mut ScheduleGraph,
-        dependency_flattened: &mut DiGraph<SystemKey>,
+        flat_dependency: SortedDag<SystemKey>,
     ) -> Result<(), ScheduleBuildError> {
-        self.build(world, graph, dependency_flattened)
+        self.build(world, graph, flat_dependency)
     }
     fn collapse_set(
         &mut self,
