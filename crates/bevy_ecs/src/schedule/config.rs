@@ -5,9 +5,9 @@ use crate::{
     schedule::{
         auto_insert_apply_deferred::IgnoreDeferred,
         condition::{BoxedCondition, SystemCondition},
-        graph::{Ambiguity, Dependency, DependencyKind, GraphInfo},
+        graph::{Ambiguity, GraphInfo},
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
-        Chain,
+        Chain, Dependency, DependencyKind,
     },
     system::{BoxedSystem, IntoSystem, ScheduleSystem, System},
 };

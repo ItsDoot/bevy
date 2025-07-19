@@ -3,14 +3,17 @@ use alloc::{boxed::Box, collections::BTreeSet, vec::Vec};
 use bevy_platform::collections::HashMap;
 
 use crate::{
-    schedule::{SystemKey, SystemSetKey},
+    schedule::{
+        graph::{Dag, SortedDag},
+        SystemKey, SystemSetKey,
+    },
     system::{IntoSystem, System},
     world::World,
 };
 
 use super::{
-    is_apply_deferred, ApplyDeferred, DiGraph, Direction, NodeId, ReportCycles, ScheduleBuildError,
-    ScheduleBuildPass, ScheduleGraph,
+    is_apply_deferred, ApplyDeferred, Direction, NodeId, ScheduleBuildError, ScheduleBuildPass,
+    ScheduleGraph,
 };
 
 /// A [`ScheduleBuildPass`] that inserts [`ApplyDeferred`] systems into the schedule graph
@@ -72,16 +75,14 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
         &mut self,
         _world: &mut World,
         graph: &mut ScheduleGraph,
-        dependency_flattened: &mut DiGraph<SystemKey>,
+        dependency_flattened: SortedDag<SystemKey>,
     ) -> Result<(), ScheduleBuildError> {
-        let mut sync_point_graph = dependency_flattened.clone();
-        let topo = graph.topsort_graph(dependency_flattened, ReportCycles::Dependency)?;
+        let mut sync_point_graph: Dag<SystemKey> = dependency_flattened.clone();
 
         fn set_has_conditions(graph: &ScheduleGraph, set: SystemSetKey) -> bool {
             graph.system_sets.has_conditions(set)
                 || graph
                     .hierarchy()
-                    .graph()
                     .edges_directed(NodeId::Set(set), Direction::Incoming)
                     .any(|(parent, _)| {
                         parent
@@ -94,7 +95,6 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
             graph.systems.has_conditions(key)
                 || graph
                     .hierarchy()
-                    .graph()
                     .edges_directed(NodeId::System(key), Direction::Incoming)
                     .any(|(parent, _)| {
                         parent
@@ -116,13 +116,16 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
         // Also store if a preceding edge would have added a sync point but was ignored to add it at
         // a later edge that is not ignored.
         let mut distances_and_pending_sync: HashMap<SystemKey, (u32, bool)> =
-            HashMap::with_capacity_and_hasher(topo.len(), Default::default());
+            HashMap::with_capacity_and_hasher(
+                dependency_flattened.iter().len(),
+                Default::default(),
+            );
 
         // Keep track of any explicit sync nodes for a specific distance.
         let mut distance_to_explicit_sync_node: HashMap<u32, SystemKey> = HashMap::default();
 
         // Determine the distance for every node and collect the explicit sync points.
-        for &key in &topo {
+        for key in dependency_flattened.iter() {
             let (node_distance, mut node_needs_sync) = distances_and_pending_sync
                 .get(&key)
                 .copied()
@@ -177,7 +180,7 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
 
         // Find any edges which have a different number of sync points between them and make sure
         // there is a sync point between them.
-        for &key in &topo {
+        for key in dependency_flattened.iter() {
             let (node_distance, _) = distances_and_pending_sync
                 .get(&key)
                 .copied()
@@ -213,15 +216,15 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
             }
         }
 
-        *dependency_flattened = sync_point_graph;
+        *dependency_flattened.into_inner() = sync_point_graph;
         Ok(())
     }
 
     fn collapse_set(
         &mut self,
         set: SystemSetKey,
-        systems: &[SystemKey],
-        dependency_flattening: &DiGraph<NodeId>,
+        systems: &BTreeSet<SystemKey>,
+        dependency_flattening: &Dag<NodeId>,
     ) -> impl Iterator<Item = (NodeId, NodeId)> {
         if systems.is_empty() {
             // collapse dependencies for empty sets

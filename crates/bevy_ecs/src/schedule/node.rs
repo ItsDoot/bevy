@@ -5,18 +5,21 @@ use core::{
     fmt::{self, Debug},
     ops::{Index, IndexMut, Range},
 };
+use std::collections::BTreeSet;
+use thiserror::Error;
 
-use bevy_platform::collections::HashMap;
+use bevy_platform::collections::{HashMap, HashSet};
 use slotmap::{new_key_type, Key, KeyData, SecondaryMap, SlotMap};
 
 use crate::{
     component::{CheckChangeTicks, ComponentId, Tick},
     prelude::{SystemIn, SystemSet},
-    query::FilteredAccessSet,
+    query::{AccessConflicts, FilteredAccessSet},
     schedule::{
-        graph::{Direction, GraphNodeId},
+        graph::{Dag, DagAnalysis, DagGroups, Direction, GraphNodeId, UnGraph},
         BoxedCondition, InternedSystemSet,
     },
+    storage::SparseSetIndex,
     system::{
         ReadOnlySystem, RunSystemError, ScheduleSystem, System, SystemParamValidationError,
         SystemStateFlags,
@@ -575,6 +578,57 @@ impl Systems {
             }
         }
     }
+
+    pub fn get_conflicts(
+        &self,
+        flat_dependency_analysis: &DagAnalysis<SystemKey>,
+        flat_ambiguous_with: &UnGraph<SystemKey>,
+        ambiguous_with_all: &HashSet<NodeId>,
+        ignored_ambiguities: &BTreeSet<ComponentId>,
+    ) -> Vec<(SystemKey, SystemKey, Vec<ComponentId>)> {
+        let mut conflicting_systems = Vec::new();
+        for &(a, b) in &flat_dependency_analysis.disconnected {
+            if flat_ambiguous_with.contains_edge(a, b)
+                || ambiguous_with_all.contains(&NodeId::System(a))
+                || ambiguous_with_all.contains(&NodeId::System(b))
+            {
+                continue;
+            }
+
+            let Some(system_a) = self.get(a) else {
+                continue;
+            };
+            let Some(system_b) = self.get(b) else {
+                continue;
+            };
+            if system_a.is_exclusive() || system_b.is_exclusive() {
+                conflicting_systems.push((a, b, Vec::new()));
+            } else {
+                let access_a = &system_a.access;
+                let access_b = &system_b.access;
+                if !access_a.is_compatible(access_b) {
+                    match access_a.get_conflicts(access_b) {
+                        AccessConflicts::All => {
+                            // there is no specific component conflicting, but the systems are overall incompatible
+                            // for example 2 systems with `Query<EntityMut>`
+                            conflicting_systems.push((a, b, Vec::new()));
+                        }
+                        AccessConflicts::Individual(conflicts) => {
+                            let conflicts: Vec<_> = conflicts
+                                .ones()
+                                .map(ComponentId::get_sparse_set_index)
+                                .filter(|id| !ignored_ambiguities.contains(id))
+                                .collect();
+                            if !conflicts.is_empty() {
+                                conflicting_systems.push((a, b, conflicts));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        conflicting_systems
+    }
 }
 
 impl Index<SystemKey> for Systems {
@@ -736,6 +790,28 @@ impl SystemSets {
             }
         }
     }
+
+    pub fn check_system_type_set_ambiguity(
+        &self,
+        set_systems: &DagGroups<SystemSetKey, SystemKey>,
+        ambiguity: &UnGraph<NodeId>,
+        dependency: &Dag<NodeId>,
+    ) -> Result<(), SystemTypeSetAmbiguityError> {
+        for (&key, systems) in set_systems.iter() {
+            let set = &self[key];
+            if set.system_type().is_some() {
+                let instances = systems.len();
+                let ambiguous_with = ambiguity.edges(NodeId::Set(key));
+                let before = dependency.edges_directed(NodeId::Set(key), Direction::Incoming);
+                let after = dependency.edges_directed(NodeId::Set(key), Direction::Outgoing);
+                let relations = before.count() + after.count() + ambiguous_with.count();
+                if instances > 1 && relations > 0 {
+                    return Err(SystemTypeSetAmbiguityError(key));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Index<SystemSetKey> for SystemSets {
@@ -751,6 +827,11 @@ impl Index<SystemSetKey> for SystemSets {
         })
     }
 }
+
+/// Error type returned by [`SystemSets::check_system_type_set_ambiguity`].
+#[derive(Error, Debug)]
+#[error("System type set ambiguity for {0:?}")]
+pub struct SystemTypeSetAmbiguityError(pub SystemSetKey);
 
 #[cfg(test)]
 mod tests {
