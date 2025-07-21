@@ -81,7 +81,6 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
             graph.system_sets.has_conditions(set)
                 || graph
                     .hierarchy()
-                    .graph()
                     .edges_directed(NodeId::Set(set), Direction::Incoming)
                     .any(|(parent, _)| {
                         parent
@@ -94,7 +93,6 @@ impl ScheduleBuildPass for AutoInsertApplyDeferredPass {
             graph.systems.has_conditions(key)
                 || graph
                     .hierarchy()
-                    .graph()
                     .edges_directed(NodeId::System(key), Direction::Incoming)
                     .any(|(parent, _)| {
                         parent

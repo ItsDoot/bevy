@@ -12,9 +12,11 @@ use fixedbitset::FixedBitSet;
 
 use crate::schedule::set::*;
 
+mod dag;
 mod graph_map;
 mod tarjan_scc;
 
+pub use dag::*;
 pub use graph_map::{DiGraph, Direction, GraphNodeId, UnGraph};
 
 /// Specifies what kind of edge should be added to the dependency graph.
