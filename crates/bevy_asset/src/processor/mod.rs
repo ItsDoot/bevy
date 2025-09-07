@@ -56,7 +56,14 @@ use crate::{
     AssetLoadError, AssetMetaCheck, AssetPath, AssetServer, AssetServerMode, DeserializeMetaError,
     MissingAssetLoaderForExtensionError, UnapprovedPathMode, WriteDefaultMetaError,
 };
-use alloc::{borrow::ToOwned, boxed::Box, collections::VecDeque, sync::Arc, vec, vec::Vec};
+use alloc::{
+    borrow::{Cow, ToOwned},
+    boxed::Box,
+    collections::VecDeque,
+    sync::Arc,
+    vec,
+    vec::Vec,
+};
 use bevy_ecs::prelude::*;
 use bevy_platform::collections::{HashMap, HashSet};
 use bevy_tasks::IoTaskPool;
@@ -293,7 +300,7 @@ impl AssetProcessor {
         // file for the unprocessed version of that asset (so it will be processed by the default
         // processor).
         let reader = source.reader();
-        match reader.read_meta_bytes(path.path()).await {
+        match reader.read_meta_bytes(Cow::Borrowed(path.path())).await {
             Ok(_) => return Err(WriteDefaultMetaError::MetaAlreadyExists),
             Err(AssetReaderError::NotFound(_)) => {
                 // The meta file couldn't be found so just fall through.
@@ -377,7 +384,7 @@ impl AssetProcessor {
             }
             AssetSourceEvent::RemovedUnknown { path, is_meta } => {
                 let processed_reader = source.processed_reader().unwrap();
-                match processed_reader.is_directory(&path).await {
+                match processed_reader.is_directory(Cow::Borrowed(&path)).await {
                     Ok(is_directory) => {
                         if is_directory {
                             self.handle_removed_folder(source, &path).await;
@@ -450,7 +457,7 @@ impl AssetProcessor {
             path.display()
         );
         let processed_reader = source.processed_reader().unwrap();
-        match processed_reader.read_directory(path).await {
+        match processed_reader.read_directory(Cow::Borrowed(path)).await {
             Ok(mut path_stream) => {
                 while let Some(child_path) = path_stream.next().await {
                     self.handle_removed_asset(source, child_path).await;
@@ -544,8 +551,8 @@ impl AssetProcessor {
         source: &'scope AssetSource,
         path: PathBuf,
     ) -> Result<(), AssetReaderError> {
-        if source.reader().is_directory(&path).await? {
-            let mut path_stream = source.reader().read_directory(&path).await?;
+        if source.reader().is_directory(Cow::Borrowed(&path)).await? {
+            let mut path_stream = source.reader().read_directory(Cow::Borrowed(&path)).await?;
             while let Some(path) = path_stream.next().await {
                 Box::pin(self.process_assets_internal(scope, source, path)).await?;
             }
@@ -629,8 +636,8 @@ impl AssetProcessor {
             path: PathBuf,
             paths: &mut Vec<PathBuf>,
         ) -> Result<bool, AssetReaderError> {
-            if reader.is_directory(&path).await? {
-                let mut path_stream = reader.read_directory(&path).await?;
+            if reader.is_directory(Cow::Borrowed(&path)).await? {
+                let mut path_stream = reader.read_directory(Cow::Borrowed(&path)).await?;
                 let mut contains_files = false;
 
                 while let Some(child_path) = path_stream.next().await {
@@ -691,7 +698,10 @@ impl AssetProcessor {
                 let mut dependencies = Vec::new();
                 let asset_path = AssetPath::from(path).with_source(source.id());
                 if let Some(info) = asset_infos.get_mut(&asset_path) {
-                    match processed_reader.read_meta_bytes(asset_path.path()).await {
+                    match processed_reader
+                        .read_meta_bytes(Cow::Borrowed(asset_path.path()))
+                        .await
+                    {
                         Ok(meta_bytes) => {
                             match ron::de::from_bytes::<ProcessedInfoMinimal>(&meta_bytes) {
                                 Ok(minimal) => {
@@ -813,9 +823,12 @@ impl AssetProcessor {
         };
 
         // Note: we get the asset source reader first because we don't want to create meta files for assets that don't have source files
-        let mut byte_reader = reader.read(path).await.map_err(reader_err)?;
+        let mut byte_reader = reader.read(Cow::Borrowed(path)).await.map_err(reader_err)?;
 
-        let (mut source_meta, meta_bytes, processor) = match reader.read_meta_bytes(path).await {
+        let (mut source_meta, meta_bytes, processor) = match reader
+            .read_meta_bytes(Cow::Borrowed(path))
+            .await
+        {
             Ok(meta_bytes) => {
                 let minimal: AssetMetaMinimal = ron::de::from_bytes(&meta_bytes).map_err(|e| {
                     ProcessError::DeserializeMetaError(DeserializeMetaError::DeserializeMinimal(e))

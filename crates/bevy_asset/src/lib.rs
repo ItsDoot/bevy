@@ -714,6 +714,7 @@ mod tests {
         UntypedHandle,
     };
     use alloc::{
+        borrow::Cow,
         boxed::Box,
         format,
         string::{String, ToString},
@@ -841,29 +842,32 @@ mod tests {
     }
 
     impl AssetReader for UnstableMemoryAssetReader {
-        async fn is_directory<'a>(&'a self, path: &'a Path) -> Result<bool, AssetReaderError> {
+        async fn is_directory<'a>(&'a self, path: Cow<'a, Path>) -> Result<bool, AssetReaderError> {
             self.memory_reader.is_directory(path).await
         }
         async fn read_directory<'a>(
             &'a self,
-            path: &'a Path,
+            path: Cow<'a, Path>,
         ) -> Result<Box<bevy_asset::io::PathStream>, AssetReaderError> {
             self.memory_reader.read_directory(path).await
         }
         async fn read_meta<'a>(
             &'a self,
-            path: &'a Path,
+            path: Cow<'a, Path>,
         ) -> Result<impl Reader + 'a, AssetReaderError> {
             self.memory_reader.read_meta(path).await
         }
-        async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
+        async fn read<'a>(
+            &'a self,
+            path: Cow<'a, Path>,
+        ) -> Result<impl Reader + 'a, AssetReaderError> {
             let attempt_number = {
                 let mut attempt_counters = self.attempt_counters.lock().unwrap();
-                if let Some(existing) = attempt_counters.get_mut(path) {
+                if let Some(existing) = attempt_counters.get_mut(path.as_ref()) {
                     *existing += 1;
                     *existing
                 } else {
-                    attempt_counters.insert(path.into(), 1);
+                    attempt_counters.insert(path.as_ref().into(), 1);
                     1
                 }
             };

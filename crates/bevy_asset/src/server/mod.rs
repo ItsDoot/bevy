@@ -18,12 +18,13 @@ use crate::{
     DeserializeMetaError, ErasedLoadedAsset, Handle, LoadedUntypedAsset, UnapprovedPathMode,
     UntypedAssetId, UntypedAssetLoadFailedEvent, UntypedHandle,
 };
-use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use alloc::{
+    borrow::Cow,
     format,
     string::{String, ToString},
     sync::Arc,
 };
+use alloc::{borrow::ToOwned, boxed::Box, vec, vec::Vec};
 use atomicow::CowArc;
 use bevy_ecs::prelude::*;
 use bevy_platform::collections::HashSet;
@@ -992,11 +993,11 @@ impl AssetServer {
             server: &'a AssetServer,
             handles: &'a mut Vec<UntypedHandle>,
         ) -> Result<(), AssetLoadError> {
-            let is_dir = reader.is_directory(path).await?;
+            let is_dir = reader.is_directory(Cow::Borrowed(path)).await?;
             if is_dir {
-                let mut path_stream = reader.read_directory(path.as_ref()).await?;
+                let mut path_stream = reader.read_directory(Cow::Borrowed(path)).await?;
                 while let Some(child_path) = path_stream.next().await {
-                    if reader.is_directory(&child_path).await? {
+                    if reader.is_directory(Cow::Borrowed(&child_path)).await? {
                         Box::pin(load_folder(
                             source.clone(),
                             &child_path,
@@ -1351,7 +1352,7 @@ impl AssetServer {
             AssetServerMode::Unprocessed => source.reader(),
             AssetServerMode::Processed => source.processed_reader()?,
         };
-        let reader = asset_reader.read(asset_path.path()).await?;
+        let reader = asset_reader.read(Cow::Borrowed(asset_path.path())).await?;
         let read_meta = match &self.data.meta_check {
             AssetMetaCheck::Always => true,
             AssetMetaCheck::Paths(paths) => paths.contains(asset_path),
@@ -1359,7 +1360,10 @@ impl AssetServer {
         };
 
         if read_meta {
-            match asset_reader.read_meta_bytes(asset_path.path()).await {
+            match asset_reader
+                .read_meta_bytes(Cow::Borrowed(asset_path.path()))
+                .await
+            {
                 Ok(meta_bytes) => {
                     // TODO: this isn't fully minimal yet. we only need the loader
                     let minimal: AssetMetaMinimal =
@@ -1615,7 +1619,7 @@ impl AssetServer {
         let source = self.get_source(path.source())?;
 
         let reader = source.reader();
-        match reader.read_meta_bytes(path.path()).await {
+        match reader.read_meta_bytes(Cow::Borrowed(path.path())).await {
             Ok(_) => return Err(WriteDefaultMetaError::MetaAlreadyExists),
             Err(AssetReaderError::NotFound(_)) => {
                 // The meta file couldn't be found so just fall through.

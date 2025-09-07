@@ -1,5 +1,10 @@
 use crate::io::{AssetReader, AssetReaderError, PathStream, Reader};
-use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
+use alloc::{
+    borrow::{Cow, ToOwned},
+    boxed::Box,
+    sync::Arc,
+    vec::Vec,
+};
 use bevy_platform::collections::HashMap;
 use core::{pin::Pin, task::Poll};
 use futures_io::AsyncRead;
@@ -287,9 +292,9 @@ impl Reader for DataReader {
 }
 
 impl AssetReader for MemoryAssetReader {
-    async fn read<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
+    async fn read<'a>(&'a self, path: Cow<'a, Path>) -> Result<impl Reader + 'a, AssetReaderError> {
         self.root
-            .get_asset(path)
+            .get_asset(&path)
             .map(|data| DataReader {
                 data,
                 bytes_read: 0,
@@ -297,9 +302,12 @@ impl AssetReader for MemoryAssetReader {
             .ok_or_else(|| AssetReaderError::NotFound(path.to_path_buf()))
     }
 
-    async fn read_meta<'a>(&'a self, path: &'a Path) -> Result<impl Reader + 'a, AssetReaderError> {
+    async fn read_meta<'a>(
+        &'a self,
+        path: Cow<'a, Path>,
+    ) -> Result<impl Reader + 'a, AssetReaderError> {
         self.root
-            .get_metadata(path)
+            .get_metadata(&path)
             .map(|data| DataReader {
                 data,
                 bytes_read: 0,
@@ -309,10 +317,10 @@ impl AssetReader for MemoryAssetReader {
 
     async fn read_directory<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> Result<Box<PathStream>, AssetReaderError> {
         self.root
-            .get_dir(path)
+            .get_dir(&path)
             .map(|dir| {
                 let stream: Box<PathStream> = Box::new(DirStream::new(dir));
                 stream
@@ -320,8 +328,8 @@ impl AssetReader for MemoryAssetReader {
             .ok_or_else(|| AssetReaderError::NotFound(path.to_path_buf()))
     }
 
-    async fn is_directory<'a>(&'a self, path: &'a Path) -> Result<bool, AssetReaderError> {
-        Ok(self.root.get_dir(path).is_some())
+    async fn is_directory<'a>(&'a self, path: Cow<'a, Path>) -> Result<bool, AssetReaderError> {
+        Ok(self.root.get_dir(&path).is_some())
     }
 }
 
