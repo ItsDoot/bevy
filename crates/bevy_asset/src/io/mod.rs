@@ -25,7 +25,7 @@ mod source;
 pub use futures_lite::AsyncWriteExt;
 pub use source::*;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use bevy_tasks::{BoxedFuture, ConditionalSendFuture};
 use core::future::Future;
 use core::{
@@ -233,24 +233,24 @@ pub trait AssetReader: Send + Sync + 'static {
     ///     # async fn read_meta_bytes<'a>(&'a self, path: &'a Path) -> Result<Vec<u8>, AssetReaderError> { unimplemented!() }
     /// }
     /// ```
-    fn read<'a>(&'a self, path: &'a Path) -> impl AssetReaderFuture<Value: Reader + 'a>;
+    fn read<'a>(&'a self, path: Cow<'a, Path>) -> impl AssetReaderFuture<Value: Reader + 'a>;
     /// Returns a future to load the full file data at the provided path.
-    fn read_meta<'a>(&'a self, path: &'a Path) -> impl AssetReaderFuture<Value: Reader + 'a>;
+    fn read_meta<'a>(&'a self, path: Cow<'a, Path>) -> impl AssetReaderFuture<Value: Reader + 'a>;
     /// Returns an iterator of directory entry names at the provided path.
     fn read_directory<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> impl ConditionalSendFuture<Output = Result<Box<PathStream>, AssetReaderError>>;
     /// Returns true if the provided path points to a directory.
     fn is_directory<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> impl ConditionalSendFuture<Output = Result<bool, AssetReaderError>>;
     /// Reads asset metadata bytes at the given `path` into a [`Vec<u8>`]. This is a convenience
     /// function that wraps [`AssetReader::read_meta`] by default.
     fn read_meta_bytes<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> impl ConditionalSendFuture<Output = Result<Vec<u8>, AssetReaderError>> {
         async {
             let mut meta_reader = self.read_meta(path).await?;
@@ -267,35 +267,35 @@ pub trait ErasedAssetReader: Send + Sync + 'static {
     /// Returns a future to load the full file data at the provided path.
     fn read<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Box<dyn Reader + 'a>, AssetReaderError>>;
     /// Returns a future to load the full file data at the provided path.
     fn read_meta<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Box<dyn Reader + 'a>, AssetReaderError>>;
     /// Returns an iterator of directory entry names at the provided path.
     fn read_directory<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Box<PathStream>, AssetReaderError>>;
     /// Returns true if the provided path points to a directory.
     fn is_directory<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<bool, AssetReaderError>>;
     /// Reads asset metadata bytes at the given `path` into a [`Vec<u8>`]. This is a convenience
     /// function that wraps [`ErasedAssetReader::read_meta`] by default.
     fn read_meta_bytes<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Vec<u8>, AssetReaderError>>;
 }
 
 impl<T: AssetReader> ErasedAssetReader for T {
     fn read<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Box<dyn Reader + 'a>, AssetReaderError>> {
         Box::pin(async {
             let reader = Self::read(self, path).await?;
@@ -304,7 +304,7 @@ impl<T: AssetReader> ErasedAssetReader for T {
     }
     fn read_meta<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Box<dyn Reader + 'a>, AssetReaderError>> {
         Box::pin(async {
             let reader = Self::read_meta(self, path).await?;
@@ -313,19 +313,19 @@ impl<T: AssetReader> ErasedAssetReader for T {
     }
     fn read_directory<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Box<PathStream>, AssetReaderError>> {
         Box::pin(Self::read_directory(self, path))
     }
     fn is_directory<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<bool, AssetReaderError>> {
         Box::pin(Self::is_directory(self, path))
     }
     fn read_meta_bytes<'a>(
         &'a self,
-        path: &'a Path,
+        path: Cow<'a, Path>,
     ) -> BoxedFuture<'a, Result<Vec<u8>, AssetReaderError>> {
         Box::pin(Self::read_meta_bytes(self, path))
     }
