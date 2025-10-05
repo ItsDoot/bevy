@@ -355,7 +355,7 @@ pub struct Insert {
 /// Trigger emitted when a component is removed from an entity, regardless
 /// of whether or not it is later replaced.
 ///
-/// Runs before the value is dropped, so you can still access the original component data.
+/// Runs before the value is replaced, so you can still access the original component data.
 /// See [`ComponentHooks::on_discard`](`crate::lifecycle::ComponentHooks::on_discard`) for more information.
 #[derive(Debug, Clone, EntityEvent)]
 #[entity_event(trigger = EntityComponentsTrigger<'a>)]
@@ -363,7 +363,7 @@ pub struct Insert {
 #[cfg_attr(feature = "bevy_reflect", reflect(Debug))]
 #[doc(alias = "OnDiscard")]
 pub struct Discard {
-    /// The entity that held this component before it was dropped.
+    /// The entity that held this component before it was replaced.
     pub entity: Entity,
 }
 
