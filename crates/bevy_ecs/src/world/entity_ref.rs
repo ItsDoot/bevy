@@ -10,7 +10,7 @@ use crate::{
         EntityIdLocation, EntityLocation, OptIn, OptOut,
     },
     event::{EntityComponentsTrigger, EntityEvent},
-    lifecycle::{Despawn, Remove, Replace, DESPAWN, REMOVE, REPLACE},
+    lifecycle::{Despawn, Discard, Remove, DESPAWN, DISCARD, REMOVE},
     observer::Observer,
     query::{Access, DebugCheckedUnwrap, ReadOnlyQueryData, ReleaseStateQueryData},
     relationship::RelationshipHookMode,
@@ -2595,11 +2595,11 @@ impl<'w> EntityWorldMut<'w> {
                 archetype.iter_components(),
                 caller,
             );
-            if archetype.has_replace_observer() {
-                // SAFETY: the REPLACE event_key corresponds to the Replace event's type
+            if archetype.has_discard_observer() {
+                // SAFETY: the DISCARD event_key corresponds to the Discard event's type
                 deferred_world.trigger_raw(
-                    REPLACE,
-                    &mut Replace {
+                    DISCARD,
+                    &mut Discard {
                         entity: self.entity,
                     },
                     &mut EntityComponentsTrigger {
@@ -2608,7 +2608,7 @@ impl<'w> EntityWorldMut<'w> {
                     caller,
                 );
             }
-            deferred_world.trigger_on_replace(
+            deferred_world.trigger_on_discard(
                 archetype,
                 self.entity,
                 archetype.iter_components(),
@@ -6353,7 +6353,7 @@ mod tests {
     struct TestVec(Vec<&'static str>);
 
     #[derive(Component)]
-    #[component(on_add = ord_a_hook_on_add, on_insert = ord_a_hook_on_insert, on_replace = ord_a_hook_on_replace, on_remove = ord_a_hook_on_remove)]
+    #[component(on_add = ord_a_hook_on_add, on_insert = ord_a_hook_on_insert, on_discard = ord_a_hook_on_discard, on_remove = ord_a_hook_on_remove)]
     struct OrdA;
 
     fn ord_a_hook_on_add(mut world: DeferredWorld, HookContext { entity, .. }: HookContext) {
@@ -6370,11 +6370,11 @@ mod tests {
         world.commands().entity(entity).remove::<OrdB>();
     }
 
-    fn ord_a_hook_on_replace(mut world: DeferredWorld, _: HookContext) {
+    fn ord_a_hook_on_discard(mut world: DeferredWorld, _: HookContext) {
         world
             .resource_mut::<TestVec>()
             .0
-            .push("OrdA hook on_replace");
+            .push("OrdA hook on_discard");
     }
 
     fn ord_a_hook_on_remove(mut world: DeferredWorld, _: HookContext) {
@@ -6392,8 +6392,8 @@ mod tests {
         res.0.push("OrdA observer on_insert");
     }
 
-    fn ord_a_observer_on_replace(_event: On<Replace, OrdA>, mut res: ResMut<TestVec>) {
-        res.0.push("OrdA observer on_replace");
+    fn ord_a_observer_on_discard(_event: On<Discard, OrdA>, mut res: ResMut<TestVec>) {
+        res.0.push("OrdA observer on_discard");
     }
 
     fn ord_a_observer_on_remove(_event: On<Remove, OrdA>, mut res: ResMut<TestVec>) {
@@ -6401,7 +6401,7 @@ mod tests {
     }
 
     #[derive(Component)]
-    #[component(on_add = ord_b_hook_on_add, on_insert = ord_b_hook_on_insert, on_replace = ord_b_hook_on_replace, on_remove = ord_b_hook_on_remove)]
+    #[component(on_add = ord_b_hook_on_add, on_insert = ord_b_hook_on_insert, on_discard = ord_b_hook_on_discard, on_remove = ord_b_hook_on_remove)]
     struct OrdB;
 
     fn ord_b_hook_on_add(mut world: DeferredWorld, _: HookContext) {
@@ -6421,11 +6421,11 @@ mod tests {
             .push("OrdB hook on_insert");
     }
 
-    fn ord_b_hook_on_replace(mut world: DeferredWorld, _: HookContext) {
+    fn ord_b_hook_on_discard(mut world: DeferredWorld, _: HookContext) {
         world
             .resource_mut::<TestVec>()
             .0
-            .push("OrdB hook on_replace");
+            .push("OrdB hook on_discard");
     }
 
     fn ord_b_hook_on_remove(mut world: DeferredWorld, _: HookContext) {
@@ -6443,8 +6443,8 @@ mod tests {
         res.0.push("OrdB observer on_insert");
     }
 
-    fn ord_b_observer_on_replace(_event: On<Replace, OrdB>, mut res: ResMut<TestVec>) {
-        res.0.push("OrdB observer on_replace");
+    fn ord_b_observer_on_discard(_event: On<Discard, OrdB>, mut res: ResMut<TestVec>) {
+        res.0.push("OrdB observer on_discard");
     }
 
     fn ord_b_observer_on_remove(_event: On<Remove, OrdB>, mut res: ResMut<TestVec>) {
@@ -6457,11 +6457,11 @@ mod tests {
         world.insert_resource(TestVec(Vec::new()));
         world.add_observer(ord_a_observer_on_add);
         world.add_observer(ord_a_observer_on_insert);
-        world.add_observer(ord_a_observer_on_replace);
+        world.add_observer(ord_a_observer_on_discard);
         world.add_observer(ord_a_observer_on_remove);
         world.add_observer(ord_b_observer_on_add);
         world.add_observer(ord_b_observer_on_insert);
-        world.add_observer(ord_b_observer_on_replace);
+        world.add_observer(ord_b_observer_on_discard);
         world.add_observer(ord_b_observer_on_remove);
         let _entity = world.spawn(OrdA).id();
         let expected = [
@@ -6474,12 +6474,12 @@ mod tests {
             "OrdB hook on_insert",
             "OrdB observer on_insert",
             "OrdB command on_add", // command added by OrdB hook on_add, needs to run before despawn command
-            "OrdA observer on_replace", // start of despawn
-            "OrdA hook on_replace",
+            "OrdA observer on_discard", // start of despawn
+            "OrdA hook on_discard",
             "OrdA observer on_remove",
             "OrdA hook on_remove",
-            "OrdB observer on_replace",
-            "OrdB hook on_replace",
+            "OrdB observer on_discard",
+            "OrdB hook on_discard",
             "OrdB observer on_remove",
             "OrdB hook on_remove",
         ];
@@ -6657,7 +6657,7 @@ mod tests {
                     Some(&Foo(EXPECTED_VALUE.load(Ordering::Relaxed)))
                 );
             })
-            .on_replace(|world, context| {
+            .on_discard(|world, context| {
                 REPLACE_COUNT.fetch_add(1, Ordering::Relaxed);
 
                 assert_eq!(

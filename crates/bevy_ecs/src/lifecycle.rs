@@ -149,7 +149,7 @@ pub struct HookContext {
 pub struct ComponentHooks {
     pub(crate) on_add: Option<ComponentHook>,
     pub(crate) on_insert: Option<ComponentHook>,
-    pub(crate) on_replace: Option<ComponentHook>,
+    pub(crate) on_discard: Option<ComponentHook>,
     pub(crate) on_remove: Option<ComponentHook>,
     pub(crate) on_despawn: Option<ComponentHook>,
 }
@@ -162,8 +162,8 @@ impl ComponentHooks {
         if let Some(hook) = C::on_insert() {
             self.on_insert(hook);
         }
-        if let Some(hook) = C::on_replace() {
-            self.on_replace(hook);
+        if let Some(hook) = C::on_discard() {
+            self.on_discard(hook);
         }
         if let Some(hook) = C::on_remove() {
             self.on_remove(hook);
@@ -212,7 +212,7 @@ impl ComponentHooks {
     /// allowing access to the previous data just before it is dropped.
     /// This hook does *not* run if the entity did not already have this component.
     ///
-    /// An `on_replace` hook always runs before any `on_remove` hooks (if the component is being removed from the entity).
+    /// An `on_discard` hook always runs before any `on_remove` hooks (if the component is being removed from the entity).
     ///
     /// # Warning
     ///
@@ -221,10 +221,10 @@ impl ComponentHooks {
     ///
     /// # Panics
     ///
-    /// Will panic if the component already has an `on_replace` hook
-    pub fn on_replace(&mut self, hook: ComponentHook) -> &mut Self {
-        self.try_on_replace(hook)
-            .expect("Component already has an on_replace hook")
+    /// Will panic if the component already has an `on_discard` hook
+    pub fn on_discard(&mut self, hook: ComponentHook) -> &mut Self {
+        self.try_on_discard(hook)
+            .expect("Component already has an on_discard hook")
     }
 
     /// Register a [`ComponentHook`] that will be run when this component is removed from an entity.
@@ -261,7 +261,7 @@ impl ComponentHooks {
         Some(self)
     }
 
-    /// Attempt to register a [`ComponentHook`] that will be run when this component is added (with `.insert`)
+    /// Attempt to register a [`ComponentHook`] that will be run when this component is added (with `.insert`).
     ///
     /// This is a fallible version of [`Self::on_insert`].
     ///
@@ -274,16 +274,17 @@ impl ComponentHooks {
         Some(self)
     }
 
-    /// Attempt to register a [`ComponentHook`] that will be run when this component is replaced (with `.insert`) or removed
+    /// Attempt to register a [`ComponentHook`] that will be run when this component
+    /// is dropped, such as when being replaced (with `.insert`) or removed.
     ///
-    /// This is a fallible version of [`Self::on_replace`].
+    /// This is a fallible version of [`Self::on_discard`].
     ///
-    /// Returns `None` if the component already has an `on_replace` hook.
-    pub fn try_on_replace(&mut self, hook: ComponentHook) -> Option<&mut Self> {
-        if self.on_replace.is_some() {
+    /// Returns `None` if the component already has an `on_discard` hook.
+    pub fn try_on_discard(&mut self, hook: ComponentHook) -> Option<&mut Self> {
+        if self.on_discard.is_some() {
             return None;
         }
-        self.on_replace = Some(hook);
+        self.on_discard = Some(hook);
         Some(self)
     }
 
@@ -318,8 +319,8 @@ impl ComponentHooks {
 pub const ADD: EventKey = EventKey(ComponentId::new(0));
 /// [`EventKey`] for [`Insert`]
 pub const INSERT: EventKey = EventKey(ComponentId::new(1));
-/// [`EventKey`] for [`Replace`]
-pub const REPLACE: EventKey = EventKey(ComponentId::new(2));
+/// [`EventKey`] for [`Discard`]
+pub const DISCARD: EventKey = EventKey(ComponentId::new(2));
 /// [`EventKey`] for [`Remove`]
 pub const REMOVE: EventKey = EventKey(ComponentId::new(3));
 /// [`EventKey`] for [`Despawn`]
@@ -355,16 +356,20 @@ pub struct Insert {
 /// of whether or not it is later replaced.
 ///
 /// Runs before the value is replaced, so you can still access the original component data.
-/// See [`ComponentHooks::on_replace`](`crate::lifecycle::ComponentHooks::on_replace`) for more information.
+/// See [`ComponentHooks::on_discard`](`crate::lifecycle::ComponentHooks::on_discard`) for more information.
 #[derive(Debug, Clone, EntityEvent)]
 #[entity_event(trigger = EntityComponentsTrigger<'a>)]
 #[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
 #[cfg_attr(feature = "bevy_reflect", reflect(Debug))]
-#[doc(alias = "OnReplace")]
-pub struct Replace {
+#[doc(alias = "OnDiscard")]
+pub struct Discard {
     /// The entity that held this component before it was replaced.
     pub entity: Entity,
 }
+
+/// See [`Discard`].
+#[deprecated(since = "0.18.0", note = "Renamed to `Discard`.")]
+pub type Replace = Discard;
 
 /// Trigger emitted when a component is removed from an entity, and runs before the component is
 /// removed, so you can still access the component data.
@@ -399,9 +404,9 @@ pub type OnAdd = Add;
 #[deprecated(since = "0.17.0", note = "Renamed to `Insert`.")]
 pub type OnInsert = Insert;
 
-/// Deprecated in favor of [`Replace`].
-#[deprecated(since = "0.17.0", note = "Renamed to `Replace`.")]
-pub type OnReplace = Replace;
+/// Deprecated in favor of [`Discard`].
+#[deprecated(since = "0.17.0", note = "Renamed to `Discard`.")]
+pub type OnReplace = Discard;
 
 /// Deprecated in favor of [`Remove`].
 #[deprecated(since = "0.17.0", note = "Renamed to `Remove`.")]
