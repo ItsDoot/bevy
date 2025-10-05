@@ -7,7 +7,7 @@ use crate::{
     component::{Component, ComponentId, Components, Mutable, StorageType},
     entity::{Entity, EntityCloner, EntityClonerBuilder, EntityLocation, OptIn, OptOut},
     event::{EntityComponentsTrigger, EntityEvent},
-    lifecycle::{Despawn, Remove, Replace, DESPAWN, REMOVE, REPLACE},
+    lifecycle::{Despawn, Discard, Remove, DESPAWN, DISCARD, REMOVE},
     observer::Observer,
     query::{
         has_conflicts, Access, DebugCheckedUnwrap, QueryAccessError, ReadOnlyQueryData,
@@ -1573,11 +1573,11 @@ impl<'w> EntityWorldMut<'w> {
                 archetype.iter_components(),
                 caller,
             );
-            if archetype.has_replace_observer() {
+            if archetype.has_discard_observer() {
                 // SAFETY: the REPLACE event_key corresponds to the Replace event's type
                 deferred_world.trigger_raw(
-                    REPLACE,
-                    &mut Replace {
+                    DISCARD,
+                    &mut Discard {
                         entity: self.entity,
                     },
                     &mut EntityComponentsTrigger {
@@ -1586,7 +1586,7 @@ impl<'w> EntityWorldMut<'w> {
                     caller,
                 );
             }
-            deferred_world.trigger_on_replace(
+            deferred_world.trigger_on_discard(
                 archetype,
                 self.entity,
                 archetype.iter_components(),
