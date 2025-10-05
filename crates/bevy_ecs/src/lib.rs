@@ -82,8 +82,8 @@ pub mod prelude {
         event::{EntityEvent, Event, EventReader, EventWriter, Events},
         hierarchy::{ChildOf, ChildSpawner, ChildSpawnerCommands, Children},
         lifecycle::{
-            Add, Despawn, Insert, OnAdd, OnDespawn, OnInsert, OnRemove, OnReplace, Remove,
-            RemovedComponents, Replace,
+            Add, Despawn, Discard, Insert, OnAdd, OnDespawn, OnInsert, OnRemove, OnReplace, Remove,
+            RemovedComponents,
         },
         message::{Message, MessageMutator, MessageReader, MessageWriter, Messages},
         name::{Name, NameOrEntity},

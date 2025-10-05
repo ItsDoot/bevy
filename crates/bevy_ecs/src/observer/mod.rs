@@ -263,7 +263,7 @@ mod tests {
         entity_disabling::Internal,
         event::{EntityComponentsTrigger, Event, GlobalTrigger},
         hierarchy::ChildOf,
-        observer::{Observer, Replace},
+        observer::{Observer, Discard},
         prelude::*,
         world::DeferredWorld,
     };
@@ -314,7 +314,7 @@ mod tests {
 
         world.add_observer(|_: On<Add, A>, mut res: ResMut<Order>| res.observed("add"));
         world.add_observer(|_: On<Insert, A>, mut res: ResMut<Order>| res.observed("insert"));
-        world.add_observer(|_: On<Replace, A>, mut res: ResMut<Order>| {
+        world.add_observer(|_: On<Discard, A>, mut res: ResMut<Order>| {
             res.observed("replace");
         });
         world.add_observer(|_: On<Remove, A>, mut res: ResMut<Order>| res.observed("remove"));
@@ -334,7 +334,7 @@ mod tests {
 
         world.add_observer(|_: On<Add, A>, mut res: ResMut<Order>| res.observed("add"));
         world.add_observer(|_: On<Insert, A>, mut res: ResMut<Order>| res.observed("insert"));
-        world.add_observer(|_: On<Replace, A>, mut res: ResMut<Order>| {
+        world.add_observer(|_: On<Discard, A>, mut res: ResMut<Order>| {
             res.observed("replace");
         });
         world.add_observer(|_: On<Remove, A>, mut res: ResMut<Order>| res.observed("remove"));
@@ -356,7 +356,7 @@ mod tests {
 
         world.add_observer(|_: On<Add, S>, mut res: ResMut<Order>| res.observed("add"));
         world.add_observer(|_: On<Insert, S>, mut res: ResMut<Order>| res.observed("insert"));
-        world.add_observer(|_: On<Replace, S>, mut res: ResMut<Order>| {
+        world.add_observer(|_: On<Discard, S>, mut res: ResMut<Order>| {
             res.observed("replace");
         });
         world.add_observer(|_: On<Remove, S>, mut res: ResMut<Order>| res.observed("remove"));
@@ -380,7 +380,7 @@ mod tests {
 
         world.add_observer(|_: On<Add, A>, mut res: ResMut<Order>| res.observed("add"));
         world.add_observer(|_: On<Insert, A>, mut res: ResMut<Order>| res.observed("insert"));
-        world.add_observer(|_: On<Replace, A>, mut res: ResMut<Order>| {
+        world.add_observer(|_: On<Discard, A>, mut res: ResMut<Order>| {
             res.observed("replace");
         });
         world.add_observer(|_: On<Remove, A>, mut res: ResMut<Order>| res.observed("remove"));

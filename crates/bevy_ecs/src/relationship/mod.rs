@@ -91,7 +91,7 @@ pub trait Relationship: Component + Sized {
     /// # Warning
     ///
     /// This should generally not be called by user code, as modifying the related entity could invalidate the
-    /// relationship. If this method is used, then the hooks [`on_replace`](Relationship::on_replace) have to
+    /// relationship. If this method is used, then the hooks [`on_discard`](Relationship::on_discard) have to
     /// run before and [`on_insert`](Relationship::on_insert) after it.
     /// This happens automatically when this method is called with [`EntityWorldMut::modify_component`].
     ///
@@ -166,9 +166,8 @@ pub trait Relationship: Component + Sized {
         }
     }
 
-    /// The `on_replace` component hook that maintains the [`Relationship`] / [`RelationshipTarget`] connection.
-    // note: think of this as "on_drop"
-    fn on_replace(
+    /// The `on_discard` component hook that maintains the [`Relationship`] / [`RelationshipTarget`] connection.
+    fn on_discard(
         mut world: DeferredWorld,
         HookContext {
             entity,
@@ -255,9 +254,8 @@ pub trait RelationshipTarget: Component<Mutability = Mutable> + Sized {
     /// The collection should not contain duplicates.
     fn from_collection_risky(collection: Self::Collection) -> Self;
 
-    /// The `on_replace` component hook that maintains the [`Relationship`] / [`RelationshipTarget`] connection.
-    // note: think of this as "on_drop"
-    fn on_replace(
+    /// The `on_discard` component hook that maintains the [`Relationship`] / [`RelationshipTarget`] connection.
+    fn on_discard(
         mut world: DeferredWorld,
         HookContext {
             entity,
