@@ -316,6 +316,12 @@ unsafe impl<R: Relationship, L: SpawnableList<R> + Send + Sync + 'static> Bundle
 impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<R, L> {
     type Effect = Self;
 
+    unsafe fn get_components_mut(&mut self, func: &mut impl FnMut(bevy_ptr::PtrMut<'_>)) {
+        let mut target =
+            <R::RelationshipTarget as RelationshipTarget>::with_capacity(self.list.size_hint());
+        target.get_components_mut(func);
+    }
+
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
         func: &mut impl FnMut(crate::component::StorageType, bevy_ptr::OwningPtr<'_>),
@@ -361,6 +367,11 @@ pub struct SpawnOneRelated<R: Relationship, B: Bundle> {
 
 impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
     type Effect = Self;
+
+    unsafe fn get_components_mut(&mut self, func: &mut impl FnMut(bevy_ptr::PtrMut<'_>)) {
+        let mut target = <R::RelationshipTarget as RelationshipTarget>::with_capacity(1);
+        target.get_components_mut(func);
+    }
 
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,

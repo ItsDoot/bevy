@@ -170,6 +170,15 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
     let dynamic_bundle_impl = quote! {
         impl #impl_generics #ecs_path::bundle::DynamicBundle for #struct_name #ty_generics #where_clause {
             type Effect = ();
+
+            #[inline]
+            unsafe fn get_components_mut(&mut self, func: &mut impl FnMut(#ecs_path::ptr::PtrMut<'_>)) {
+                let #struct_name { #(#active_field_tokens: #active_field_alias,)* #(#inactive_field_tokens: _,)* } = self;
+                #(
+                    <#active_field_types as #ecs_path::bundle::DynamicBundle>::get_components_mut(#active_field_alias, func);
+                )*
+            }
+
             #[allow(unused_variables)]
             #[inline]
             unsafe fn get_components(

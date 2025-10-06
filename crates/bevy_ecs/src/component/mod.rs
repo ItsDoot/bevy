@@ -14,7 +14,7 @@ pub use tick::*;
 
 use crate::{
     entity::EntityMapper,
-    lifecycle::ComponentHook,
+    lifecycle::{ComponentHook, ComponentReplaceHook},
     system::{Local, SystemParam},
     world::{FromWorld, World},
 };
@@ -503,6 +503,11 @@ pub trait Component: Send + Sync + 'static {
 
     /// Gets the `on_insert` [`ComponentHook`] for this [`Component`] if one is defined.
     fn on_insert() -> Option<ComponentHook> {
+        None
+    }
+
+    /// Gets the `on_replace` [`ComponentReplaceHook`] for this [`Component`] if one is defined.
+    fn on_replace() -> Option<ComponentReplaceHook> {
         None
     }
 

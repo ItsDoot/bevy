@@ -14,7 +14,7 @@ pub(crate) use insert::BundleInserter;
 pub(crate) use remove::BundleRemover;
 pub(crate) use spawner::BundleSpawner;
 
-use bevy_ptr::MovingPtr;
+use bevy_ptr::{MovingPtr, PtrMut};
 use core::mem::MaybeUninit;
 pub use info::*;
 
@@ -239,6 +239,15 @@ pub unsafe trait BundleFromComponents {
 pub trait DynamicBundle: Sized {
     /// An operation on the entity that happens _after_ inserting this bundle.
     type Effect;
+
+    /// Provides type-erased mutable access to each component in the bundle.
+    ///
+    /// # Safety
+    /// For implementors:
+    /// - Implementors of this function must convert `ptr` into pointers to individual components stored within
+    ///   `Self` and call `func` on each of them in exactly the same order as [`Bundle::get_component_ids`] and
+    ///   [`BundleFromComponents::from_components`].
+    unsafe fn get_components_mut(&mut self, func: &mut impl FnMut(PtrMut<'_>));
 
     /// Moves the components out of the bundle.
     ///

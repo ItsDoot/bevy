@@ -1,5 +1,6 @@
 use core::ops::Deref;
 
+use bevy_ptr::PtrMut;
 use bevy_utils::prelude::DebugName;
 
 use crate::{
@@ -686,6 +687,33 @@ impl<'w> DeferredWorld<'w> {
                         },
                     );
                 }
+            }
+        }
+    }
+
+    pub(crate) unsafe fn trigger_on_replace(
+        &mut self,
+        archetype: &Archetype,
+        entity: Entity,
+        target: ComponentId,
+        component: PtrMut<'_>,
+        caller: MaybeLocation,
+        relationship_hook_mode: RelationshipHookMode,
+    ) {
+        if archetype.has_replace_hook() {
+            // SAFETY: Caller ensures that these components exist
+            let hooks = unsafe { self.components().get_info_unchecked(target) }.hooks();
+            if let Some(hook) = hooks.on_replace {
+                hook(
+                    DeferredWorld { world: self.world },
+                    HookContext {
+                        entity,
+                        component_id: target,
+                        caller,
+                        relationship_hook_mode,
+                    },
+                    component,
+                );
             }
         }
     }

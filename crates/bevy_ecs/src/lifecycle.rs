@@ -53,7 +53,7 @@ use crate::{
     change_detection::MaybeLocation,
     component::{Component, ComponentId, ComponentIdFor, Tick},
     entity::Entity,
-    event::{EntityComponentsTrigger, EntityEvent, EventKey},
+    event::{EntityComponentsReplaceTrigger, EntityComponentsTrigger, EntityEvent, EventKey},
     message::{
         Message, MessageCursor, MessageId, MessageIterator, MessageIteratorWithId, Messages,
     },
@@ -64,6 +64,7 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
+use bevy_ptr::PtrMut;
 use derive_more::derive::Into;
 
 #[cfg(feature = "bevy_reflect")]
@@ -78,6 +79,9 @@ use core::{
 
 /// The type used for [`Component`] lifecycle hooks such as `on_add`, `on_insert` or `on_remove`.
 pub type ComponentHook = for<'w> fn(DeferredWorld<'w>, HookContext);
+
+/// The type used for [`Component`] lifecycle hooks such as `on_replace`.
+pub type ComponentReplaceHook = for<'w> fn(DeferredWorld<'w>, HookContext, PtrMut<'w>);
 
 /// Context provided to a [`ComponentHook`].
 #[derive(Clone, Copy, Debug)]
@@ -149,6 +153,7 @@ pub struct HookContext {
 pub struct ComponentHooks {
     pub(crate) on_add: Option<ComponentHook>,
     pub(crate) on_insert: Option<ComponentHook>,
+    pub(crate) on_replace: Option<ComponentReplaceHook>,
     pub(crate) on_discard: Option<ComponentHook>,
     pub(crate) on_remove: Option<ComponentHook>,
     pub(crate) on_despawn: Option<ComponentHook>,
@@ -161,6 +166,9 @@ impl ComponentHooks {
         }
         if let Some(hook) = C::on_insert() {
             self.on_insert(hook);
+        }
+        if let Some(hook) = C::on_replace() {
+            self.on_replace(hook);
         }
         if let Some(hook) = C::on_discard() {
             self.on_discard(hook);
@@ -203,6 +211,27 @@ impl ComponentHooks {
     pub fn on_insert(&mut self, hook: ComponentHook) -> &mut Self {
         self.try_on_insert(hook)
             .expect("Component already has an on_insert hook")
+    }
+
+    /// Register a [`ComponentReplaceHook`] that will be run when this component
+    /// is about to be replaced (with `.insert`).
+    ///
+    /// An `on_replace` hook always runs before any `on_discard` hooks
+    /// (if the component is being replaced).
+    ///
+    /// # Warning
+    ///
+    /// The hook won't run if the component is already present and is only
+    /// mutated, such as in a system via a query. As a result, this needs to be
+    /// combined with immutable components to serve as a mechanism for reliably
+    /// updating indexes and other caches.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if the component already has an `on_replace` hook.
+    pub fn on_replace(&mut self, hook: ComponentReplaceHook) -> &mut Self {
+        self.try_on_replace(hook)
+            .expect("Component already has an on_replace hook")
     }
 
     /// Register a [`ComponentHook`] that will be run when this component is about to be dropped,
@@ -274,6 +303,20 @@ impl ComponentHooks {
         Some(self)
     }
 
+    /// Attempt to register a [`ComponentReplaceHook`] that will be run when this
+    /// component is about to be replaced (with `.insert`).
+    ///
+    /// This is a fallible version of [`Self::on_replace`].
+    ///
+    /// Returns `None` if the component already has an `on_replace` hook.
+    pub fn try_on_replace(&mut self, hook: ComponentReplaceHook) -> Option<&mut Self> {
+        if self.on_replace.is_some() {
+            return None;
+        }
+        self.on_replace = Some(hook);
+        Some(self)
+    }
+
     /// Attempt to register a [`ComponentHook`] that will be run when this component
     /// is dropped, such as when being replaced (with `.insert`) or removed.
     ///
@@ -319,12 +362,14 @@ impl ComponentHooks {
 pub const ADD: EventKey = EventKey(ComponentId::new(0));
 /// [`EventKey`] for [`Insert`]
 pub const INSERT: EventKey = EventKey(ComponentId::new(1));
+/// [`EventKey`] for [`Replace`]
+pub const REPLACE: EventKey = EventKey(ComponentId::new(2));
 /// [`EventKey`] for [`Discard`]
-pub const DISCARD: EventKey = EventKey(ComponentId::new(2));
+pub const DISCARD: EventKey = EventKey(ComponentId::new(3));
 /// [`EventKey`] for [`Remove`]
-pub const REMOVE: EventKey = EventKey(ComponentId::new(3));
+pub const REMOVE: EventKey = EventKey(ComponentId::new(4));
 /// [`EventKey`] for [`Despawn`]
-pub const DESPAWN: EventKey = EventKey(ComponentId::new(4));
+pub const DESPAWN: EventKey = EventKey(ComponentId::new(5));
 
 /// Trigger emitted when a component is inserted onto an entity that does not already have that
 /// component. Runs before `Insert`.
@@ -352,6 +397,20 @@ pub struct Insert {
     pub entity: Entity,
 }
 
+/// Trigger emitted when a component is replaced on an entity, i.e., when a
+/// component is inserted onto an entity that already has that component.
+///
+/// Runs before the value is replaced, so you can still access the original component data.
+#[derive(Debug, Clone, EntityEvent)]
+#[entity_event(trigger = EntityComponentsReplaceTrigger<'a>)]
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "bevy_reflect", reflect(Debug))]
+#[doc(alias = "OnReplace")]
+pub struct Replace {
+    /// The entity that held this component before it was replaced.
+    pub entity: Entity,
+}
+
 /// Trigger emitted when a component is removed from an entity, regardless
 /// of whether or not it is later replaced.
 ///
@@ -366,10 +425,6 @@ pub struct Discard {
     /// The entity that held this component before it was replaced.
     pub entity: Entity,
 }
-
-/// See [`Discard`].
-#[deprecated(since = "0.18.0", note = "Renamed to `Discard`.")]
-pub type Replace = Discard;
 
 /// Trigger emitted when a component is removed from an entity, and runs before the component is
 /// removed, so you can still access the component data.

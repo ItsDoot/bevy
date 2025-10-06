@@ -1,6 +1,6 @@
 use core::any::TypeId;
 
-use bevy_ptr::{MovingPtr, OwningPtr};
+use bevy_ptr::{MovingPtr, OwningPtr, PtrMut};
 use core::mem::MaybeUninit;
 use variadics_please::all_tuples_enumerated;
 
@@ -40,6 +40,11 @@ unsafe impl<C: Component> BundleFromComponents for C {
 
 impl<C: Component> DynamicBundle for C {
     type Effect = ();
+
+    unsafe fn get_components_mut(&mut self, func: &mut impl FnMut(PtrMut<'_>)) {
+        func(PtrMut::from(self));
+    }
+
     #[inline]
     unsafe fn get_components(
         ptr: MovingPtr<'_, Self>,
@@ -127,6 +132,12 @@ macro_rules! tuple_impl {
         $(#[$meta])*
         impl<$($name: Bundle),*> DynamicBundle for ($($name,)*) {
             type Effect = ($($name::Effect,)*);
+
+            unsafe fn get_components_mut(&mut self, func: &mut impl FnMut(PtrMut<'_>)) {
+                let ($($alias,)*) = self;
+                $( $name::get_components_mut($alias, func); )*
+            }
+
             #[allow(
                 clippy::unused_unit,
                 reason = "Zero-length tuples will generate a function body equivalent to `()`; however, this macro is meant for all applicable tuples, and as such it makes no sense to rewrite it just for that case."

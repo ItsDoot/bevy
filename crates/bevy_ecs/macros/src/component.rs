@@ -90,6 +90,10 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
             .map(|path| path.to_token_stream(&bevy_ecs_path))
     };
 
+    let on_replace_path = attrs
+        .on_replace
+        .map(|path| path.to_token_stream(&bevy_ecs_path));
+
     let on_discard_path = if relationship.is_some() {
         if attrs.on_discard.is_some() {
             return syn::Error::new(
@@ -140,6 +144,8 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 
     let on_add = hook_register_function_call(&bevy_ecs_path, quote! {on_add}, on_add_path);
     let on_insert = hook_register_function_call(&bevy_ecs_path, quote! {on_insert}, on_insert_path);
+    let on_replace =
+        replace_hook_register_function_call(&bevy_ecs_path, quote! {on_replace}, on_replace_path);
     let on_discard =
         hook_register_function_call(&bevy_ecs_path, quote! {on_discard}, on_discard_path);
     let on_remove = hook_register_function_call(&bevy_ecs_path, quote! {on_remove}, on_remove_path);
@@ -217,6 +223,7 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 
             #on_add
             #on_insert
+            #on_replace
             #on_discard
             #on_remove
             #on_despawn
@@ -335,6 +342,7 @@ pub const RELATIONSHIP_TARGET: &str = "relationship_target";
 
 pub const ON_ADD: &str = "on_add";
 pub const ON_INSERT: &str = "on_insert";
+pub const ON_REPLACE: &str = "on_replace";
 pub const ON_DISCARD: &str = "on_discard";
 pub const ON_REMOVE: &str = "on_remove";
 pub const ON_DESPAWN: &str = "on_despawn";
@@ -452,6 +460,7 @@ struct Attrs {
     requires: Option<Punctuated<Require, Comma>>,
     on_add: Option<HookAttributeKind>,
     on_insert: Option<HookAttributeKind>,
+    on_replace: Option<HookAttributeKind>,
     on_discard: Option<HookAttributeKind>,
     on_remove: Option<HookAttributeKind>,
     on_despawn: Option<HookAttributeKind>,
@@ -491,6 +500,7 @@ fn parse_component_attr(ast: &DeriveInput) -> Result<Attrs> {
         storage: StorageTy::Table,
         on_add: None,
         on_insert: None,
+        on_replace: None,
         on_discard: None,
         on_remove: None,
         on_despawn: None,
@@ -522,6 +532,9 @@ fn parse_component_attr(ast: &DeriveInput) -> Result<Attrs> {
                     Ok(())
                 } else if nested.path.is_ident(ON_INSERT) {
                     attrs.on_insert = Some(nested.value()?.parse::<HookAttributeKind>()?);
+                    Ok(())
+                } else if nested.path.is_ident(ON_REPLACE) {
+                    attrs.on_replace = Some(nested.value()?.parse::<HookAttributeKind>()?);
                     Ok(())
                 } else if nested.path.is_ident(ON_DISCARD) {
                     attrs.on_discard = Some(nested.value()?.parse::<HookAttributeKind>()?);
@@ -661,6 +674,20 @@ fn hook_register_function_call(
     function.map(|meta| {
         quote! {
             fn #hook() -> ::core::option::Option<#bevy_ecs_path::lifecycle::ComponentHook> {
+                ::core::option::Option::Some(#meta)
+            }
+        }
+    })
+}
+
+fn replace_hook_register_function_call(
+    bevy_ecs_path: &Path,
+    hook: TokenStream2,
+    function: Option<TokenStream2>,
+) -> Option<TokenStream2> {
+    function.map(|meta| {
+        quote! {
+            fn #hook() -> ::core::option::Option<#bevy_ecs_path::lifecycle::ComponentReplaceHook> {
                 ::core::option::Option::Some(#meta)
             }
         }

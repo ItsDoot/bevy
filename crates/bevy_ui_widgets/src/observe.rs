@@ -47,6 +47,11 @@ impl<E: EntityEvent, B: Bundle, M, I: IntoObserverSystem<E, B, M>> DynamicBundle
     type Effect = Self;
 
     #[inline]
+    unsafe fn get_components_mut(&mut self, _func: &mut impl FnMut(bevy_ecs::ptr::PtrMut<'_>)) {
+        // SAFETY: Empty function body
+    }
+
+    #[inline]
     unsafe fn get_components(
         _ptr: bevy_ecs::ptr::MovingPtr<'_, Self>,
         _func: &mut impl FnMut(bevy_ecs::component::StorageType, bevy_ecs::ptr::OwningPtr<'_>),

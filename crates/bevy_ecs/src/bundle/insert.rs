@@ -5,14 +5,14 @@ use core::ptr::NonNull;
 use crate::{
     archetype::{
         Archetype, ArchetypeAfterBundleInsert, ArchetypeCreated, ArchetypeId, Archetypes,
-        ComponentStatus,
+        BundleComponentStatus, ComponentStatus,
     },
     bundle::{ArchetypeMoveType, Bundle, BundleId, BundleInfo, DynamicBundle, InsertMode},
     change_detection::MaybeLocation,
     component::{Components, StorageType, Tick},
     entity::{Entities, Entity, EntityLocation},
-    event::EntityComponentsTrigger,
-    lifecycle::{Add, Discard, Insert, ADD, DISCARD, INSERT},
+    event::{EntityComponentsReplaceTrigger, EntityComponentsTrigger},
+    lifecycle::{Add, Discard, Insert, Replace, ADD, DISCARD, INSERT, REPLACE},
     observer::Observers,
     query::DebugCheckedUnwrap as _,
     relationship::RelationshipHookMode,
@@ -152,7 +152,7 @@ impl<'w> BundleInserter<'w> {
         &mut self,
         entity: Entity,
         location: EntityLocation,
-        bundle: MovingPtr<'_, T>,
+        mut bundle: MovingPtr<'_, T>,
         insert_mode: InsertMode,
         caller: MaybeLocation,
         relationship_hook_mode: RelationshipHookMode,
@@ -168,6 +168,39 @@ impl<'w> BundleInserter<'w> {
             let mut deferred_world = self.world.into_deferred();
 
             if insert_mode == InsertMode::Replace {
+                let mut component_idx = 0;
+                bundle.get_components_mut(&mut |mut ptr| {
+                    let already_exists = archetype_after_insert.get_status(component_idx)
+                        == ComponentStatus::Existing;
+                    if already_exists {
+                        let target = bundle_info.explicit_components()[component_idx];
+
+                        if archetype.has_replace_observer() {
+                            // SAFETY: the REPLACE event_key corresponds to the Replace event's type
+                            deferred_world.trigger_raw(
+                                REPLACE,
+                                &mut Replace { entity },
+                                &mut EntityComponentsReplaceTrigger {
+                                    component: target,
+                                    new: ptr.reborrow(),
+                                },
+                                caller,
+                            );
+                        }
+
+                        deferred_world.trigger_on_replace(
+                            archetype,
+                            entity,
+                            target,
+                            ptr,
+                            caller,
+                            relationship_hook_mode,
+                        );
+                    }
+
+                    component_idx += 1;
+                });
+
                 if archetype.has_discard_observer() {
                     // SAFETY: the DISCARD event_key corresponds to the Discard event's type
                     deferred_world.trigger_raw(

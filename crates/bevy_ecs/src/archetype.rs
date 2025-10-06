@@ -372,14 +372,16 @@ bitflags::bitflags! {
     pub(crate) struct ArchetypeFlags: u32 {
         const ON_ADD_HOOK    = (1 << 0);
         const ON_INSERT_HOOK = (1 << 1);
-        const ON_DISCARD_HOOK = (1 << 2);
-        const ON_REMOVE_HOOK = (1 << 3);
-        const ON_DESPAWN_HOOK = (1 << 4);
-        const ON_ADD_OBSERVER = (1 << 5);
-        const ON_INSERT_OBSERVER = (1 << 6);
-        const ON_DISCARD_OBSERVER = (1 << 7);
-        const ON_REMOVE_OBSERVER = (1 << 8);
-        const ON_DESPAWN_OBSERVER = (1 << 9);
+        const ON_REPLACE_HOOK = (1 << 2);
+        const ON_DISCARD_HOOK = (1 << 3);
+        const ON_REMOVE_HOOK = (1 << 4);
+        const ON_DESPAWN_HOOK = (1 << 5);
+        const ON_ADD_OBSERVER = (1 << 6);
+        const ON_INSERT_OBSERVER = (1 << 7);
+        const ON_REPLACE_OBSERVER = (1 << 8);
+        const ON_DISCARD_OBSERVER = (1 << 9);
+        const ON_REMOVE_OBSERVER = (1 << 10);
+        const ON_DESPAWN_OBSERVER = (1 << 11);
     }
 }
 
@@ -689,6 +691,12 @@ impl Archetype {
         self.flags().contains(ArchetypeFlags::ON_INSERT_HOOK)
     }
 
+    /// Returns true if any of the components in this archetype have `on_replace` hooks
+    #[inline]
+    pub fn has_replace_hook(&self) -> bool {
+        self.flags().contains(ArchetypeFlags::ON_REPLACE_HOOK)
+    }
+
     /// Returns true if any of the components in this archetype have `on_discard` hooks
     #[inline]
     pub fn has_discard_hook(&self) -> bool {
@@ -721,6 +729,14 @@ impl Archetype {
     #[inline]
     pub fn has_insert_observer(&self) -> bool {
         self.flags().contains(ArchetypeFlags::ON_INSERT_OBSERVER)
+    }
+
+    /// Returns true if any of the components in this archetype have at least one [`Replace`] observer
+    ///
+    /// [`Replace`]: crate::lifecycle::Replace
+    #[inline]
+    pub fn has_replace_observer(&self) -> bool {
+        self.flags().contains(ArchetypeFlags::ON_REPLACE_OBSERVER)
     }
 
     /// Returns true if any of the components in this archetype have at least one [`Discard`] observer
