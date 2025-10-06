@@ -105,6 +105,10 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
             .map(|path| path.to_token_stream(&bevy_ecs_path))
     };
 
+    let on_replace_path = attrs
+        .on_replace
+        .map(|path| path.to_token_stream(&bevy_ecs_path));
+
     let on_discard_path = if relationship.is_some() {
         if attrs.on_discard.is_some() {
             return syn::Error::new(
@@ -155,6 +159,8 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 
     let on_add = hook_register_function_call(&bevy_ecs_path, quote! {on_add}, on_add_path);
     let on_insert = hook_register_function_call(&bevy_ecs_path, quote! {on_insert}, on_insert_path);
+    let on_replace =
+        replace_hook_register_function_call(&bevy_ecs_path, quote! {on_replace}, on_replace_path);
     let on_discard =
         hook_register_function_call(&bevy_ecs_path, quote! {on_discard}, on_discard_path);
     let on_remove = hook_register_function_call(&bevy_ecs_path, quote! {on_remove}, on_remove_path);
@@ -261,6 +267,7 @@ pub fn derive_component(input: TokenStream) -> TokenStream {
 
             #on_add
             #on_insert
+            #on_replace
             #on_discard
             #on_remove
             #on_despawn
@@ -733,6 +740,20 @@ fn hook_register_function_call(
     function.map(|meta| {
         quote! {
             fn #hook() -> ::core::option::Option<#bevy_ecs_path::lifecycle::ComponentHook> {
+                ::core::option::Option::Some(#meta)
+            }
+        }
+    })
+}
+
+fn replace_hook_register_function_call(
+    bevy_ecs_path: &Path,
+    hook: TokenStream2,
+    function: Option<TokenStream2>,
+) -> Option<TokenStream2> {
+    function.map(|meta| {
+        quote! {
+            fn #hook() -> ::core::option::Option<#bevy_ecs_path::lifecycle::ComponentReplaceHook> {
                 ::core::option::Option::Some(#meta)
             }
         }

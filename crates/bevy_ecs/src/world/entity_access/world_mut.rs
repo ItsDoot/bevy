@@ -2307,6 +2307,11 @@ unsafe fn insert_dynamic_bundle<
         for DynamicInsertBundle<'a, I>
     {
         type Effect = ();
+
+        unsafe fn get_components_mut(&mut self, func: &mut impl FnMut(bevy_ptr::PtrMut<'_>)) {
+            (&mut self.components).for_each(|(_t, mut ptr)| func(ptr.as_mut()));
+        }
+
         unsafe fn get_components(
             mut ptr: MovingPtr<'_, Self>,
             func: &mut impl FnMut(StorageType, OwningPtr<'_>),

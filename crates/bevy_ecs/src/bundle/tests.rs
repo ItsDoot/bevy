@@ -1,3 +1,5 @@
+use bevy_ptr::PtrMut;
+
 use crate::{
     archetype::ArchetypeCreated, lifecycle::HookContext, prelude::*, world::DeferredWorld,
 };
@@ -262,4 +264,26 @@ struct Ignore {
     foo: i32,
     #[bundle(ignore)]
     bar: i32,
+}
+
+#[derive(Component, PartialEq, Eq, Debug)]
+#[component(on_replace = Counter::on_replace)]
+struct Counter(usize);
+
+impl Counter {
+    fn on_replace(world: DeferredWorld, HookContext { entity, .. }: HookContext, new: PtrMut<'_>) {
+        // SAFETY: We know that `new` is a `Counter` because this is the `on_replace` hook for `Counter`.
+        let new = unsafe { new.deref_mut::<Counter>() };
+        let current = world.entity(entity).get::<Counter>().unwrap();
+        new.0 += current.0;
+    }
+}
+
+#[test]
+fn counter_replace_hook() {
+    let mut world = World::new();
+    let mut entity = world.spawn(Counter(1));
+    entity.insert(Counter(2));
+    entity.insert(Counter(3));
+    assert_eq!(entity.get::<Counter>(), Some(&Counter(6)));
 }
