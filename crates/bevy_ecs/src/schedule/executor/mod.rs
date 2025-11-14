@@ -151,9 +151,11 @@ impl SystemSchedule {
 #[doc(alias = "apply_system_buffers")]
 pub struct ApplyDeferred;
 
-/// Returns `true` if the [`System`] is an instance of [`ApplyDeferred`].
-pub(super) fn is_apply_deferred(system: &dyn System<In = (), Out = ()>) -> bool {
-    system.type_id() == TypeId::of::<ApplyDeferred>()
+impl dyn System<In = (), Out = ()> {
+    /// Returns `true` if the system is an instance of [`ApplyDeferred`].
+    pub(crate) fn is_apply_deferred(&self) -> bool {
+        self.type_id() == TypeId::of::<ApplyDeferred>()
+    }
 }
 
 impl System for ApplyDeferred {
@@ -243,13 +245,13 @@ impl IntoSystemSet<()> for ApplyDeferred {
 mod __rust_begin_short_backtrace {
     use core::hint::black_box;
 
-    #[cfg(feature = "std")]
-    use crate::world::unsafe_world_cell::UnsafeWorldCell;
     use crate::{
         error::Result,
-        system::{ReadOnlySystem, RunSystemError, ScheduleSystem},
+        system::{ReadOnlySystem, RunSystemError},
         world::World,
     };
+    #[cfg(feature = "std")]
+    use crate::{system::System, world::unsafe_world_cell::UnsafeWorldCell};
 
     /// # Safety
     /// See `System::run_unsafe`.
@@ -257,7 +259,7 @@ mod __rust_begin_short_backtrace {
     #[cfg(feature = "std")]
     #[inline(never)]
     pub(super) unsafe fn run_unsafe(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: UnsafeWorldCell,
     ) -> Result<(), RunSystemError> {
         let result = system.run_unsafe((), world);
@@ -282,7 +284,7 @@ mod __rust_begin_short_backtrace {
     #[cfg(feature = "std")]
     #[inline(never)]
     pub(super) fn run(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run((), world);
@@ -293,7 +295,7 @@ mod __rust_begin_short_backtrace {
 
     #[inline(never)]
     pub(super) fn run_without_applying_deferred(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run_without_applying_deferred((), world);

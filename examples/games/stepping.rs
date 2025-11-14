@@ -128,11 +128,8 @@ fn build_ui(
 
         // grab the list of systems in the schedule, in the order the
         // single-threaded executor would run them.
-        let Ok(systems) = schedule.systems() else {
-            return;
-        };
-
-        for (key, system) in systems {
+        for (key, system, _) in schedule.graph().systems.iter() {
+            let system = system.lock();
             // skip bevy default systems; we don't want to step those
             #[cfg(feature = "debug")]
             if system.name().as_string().starts_with("bevy") {

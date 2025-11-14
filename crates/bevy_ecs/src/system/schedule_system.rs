@@ -1,10 +1,13 @@
+use core::ops::DerefMut;
+
+use bevy_platform::sync::{Arc, Mutex};
 use bevy_utils::prelude::DebugName;
 
 use crate::{
     change_detection::{CheckChangeTicks, Tick},
     error::Result,
     query::FilteredAccessSet,
-    system::{input::SystemIn, BoxedSystem, RunSystemError, System, SystemInput},
+    system::{input::SystemIn, ReadOnlySystem, RunSystemError, System, SystemInput},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, FromWorld, World},
 };
 
@@ -207,5 +210,57 @@ where
     }
 }
 
-/// Type alias for a `BoxedSystem` that a `Schedule` can store.
-pub type ScheduleSystem = BoxedSystem<(), ()>;
+/// Type alias for a [`SystemArc`] that a [`Schedule`] can run.
+///
+/// [`Schedule`]: crate::schedule::Schedule
+pub type ScheduleSystem = SystemArc<dyn System<In = (), Out = ()>>;
+
+/// Type alias for a [`SystemArc`] that a [`Schedule`] can use as a condition.
+///
+/// [`Schedule`]: crate::schedule::Schedule
+pub type ScheduleCondition = SystemArc<dyn ReadOnlySystem<In = (), Out = bool>>;
+
+/// A thread-safe system wrapper using `Arc<Mutex<...>>`.
+pub struct SystemArc<S: ?Sized + System> {
+    system: Arc<Mutex<S>>,
+}
+
+impl<S: ?Sized + System> SystemArc<S> {
+    /// Locks the system for mutable access.
+    pub fn lock(&self) -> impl DerefMut<Target = S> + '_ {
+        self.system.lock().unwrap()
+    }
+}
+
+impl<S: System> SystemArc<S> {
+    /// Wraps the given system into a `SystemArc`.
+    pub fn new(system: S) -> Self {
+        Self {
+            system: Arc::new(Mutex::new(system)),
+        }
+    }
+
+    /// Converts the `SystemArc<S>` into a `SystemArc<dyn System>`.
+    pub fn into_dyn(self) -> SystemArc<dyn System<In = S::In, Out = S::Out>> {
+        SystemArc {
+            system: self.system as Arc<Mutex<dyn System<In = S::In, Out = S::Out>>>,
+        }
+    }
+}
+
+impl<S: ReadOnlySystem> SystemArc<S> {
+    /// Converts the `SystemArc<S>` into a `SystemArc<dyn ReadOnlySystem>`.
+    pub fn into_dyn_readonly(self) -> SystemArc<dyn ReadOnlySystem<In = S::In, Out = S::Out>> {
+        SystemArc {
+            system: self.system as Arc<Mutex<dyn ReadOnlySystem<In = S::In, Out = S::Out>>>,
+        }
+    }
+}
+
+impl<S: ?Sized + System> Clone for SystemArc<S> {
+    fn clone(&self) -> Self {
+        Self {
+            system: Arc::clone(&self.system),
+        }
+    }
+}
