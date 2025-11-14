@@ -660,8 +660,8 @@ impl ScheduleState {
         // updates for the system TypeId.
         // PERF: If we add a way to efficiently query schedule systems by their TypeId, we could remove the full
         // system scan here
-        for (key, system) in schedule.systems().unwrap() {
-            let behavior = self.behavior_updates.get(&system.type_id());
+        for (key, system, _) in schedule.graph().systems.iter() {
+            let behavior = self.behavior_updates.get(&system.lock().type_id());
             match behavior {
                 None => continue,
                 Some(None) => {
@@ -701,7 +701,7 @@ impl ScheduleState {
 
         // if we don't have a first system set, set it now
         if self.first.is_none() {
-            for (i, (key, _)) in schedule.systems().unwrap().enumerate() {
+            for (i, (key, _, _)) in schedule.graph().systems.iter().enumerate() {
                 match self.behaviors.get(&NodeId::System(key)) {
                     Some(SystemBehavior::AlwaysRun | SystemBehavior::NeverRun) => continue,
                     Some(_) | None => {
@@ -715,7 +715,7 @@ impl ScheduleState {
         let mut skip = FixedBitSet::with_capacity(schedule.systems_len());
         let mut pos = start;
 
-        for (i, (key, _system)) in schedule.systems().unwrap().enumerate() {
+        for (i, (key, _system, _)) in schedule.graph().systems.iter().enumerate() {
             let behavior = self
                 .behaviors
                 .get(&NodeId::System(key))
@@ -728,7 +728,7 @@ impl ScheduleState {
                 pos,
                 action,
                 behavior,
-                _system.name()
+                _system.lock().name()
             );
 
             match (action, behavior) {
