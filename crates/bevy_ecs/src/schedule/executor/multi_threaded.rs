@@ -12,10 +12,12 @@ use std::sync::{Mutex, MutexGuard};
 use tracing::{info_span, Span};
 
 use crate::{
+    change_detection::CheckChangeTicks,
     error::{ErrorContext, ErrorHandler, Result},
     prelude::Resource,
     schedule::{
-        ConditionWithAccess, ExecutorKind, ScheduleExecutable, SystemExecutor, SystemWithAccess,
+        ConditionWithAccess, ExecutorKind, ScheduleExecutable, ScheduleExecutor, ScheduleGraph,
+        ScheduleGraphAnalysis, SystemWithAccess,
     },
     system::{RunSystemError, System},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -28,19 +30,13 @@ use super::__rust_begin_short_backtrace;
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env> {
     executor: &'env MultiThreadedExecutor,
-    executable: &'env ScheduleExecutable,
     world_cell: UnsafeWorldCell<'env>,
 }
 
 impl<'env> Environment<'env> {
-    fn new(
-        executor: &'env MultiThreadedExecutor,
-        executable: &'env ScheduleExecutable,
-        world: &'env mut World,
-    ) -> Self {
+    fn new(executor: &'env MultiThreadedExecutor, world: &'env mut World) -> Self {
         Environment {
             executor,
-            executable,
             world_cell: world.as_unsafe_world_cell(),
         }
     }
@@ -71,6 +67,7 @@ struct SystemResult {
 
 /// Runs the schedule using a thread pool. Non-conflicting systems can run in parallel.
 pub struct MultiThreadedExecutor {
+    executable: ScheduleExecutable,
     /// The running state, protected by a mutex so that a reference to the executor can be shared across tasks.
     state: Mutex<ExecutorState>,
     /// Queue of system completion events.
@@ -132,16 +129,18 @@ impl Default for MultiThreadedExecutor {
     }
 }
 
-impl SystemExecutor for MultiThreadedExecutor {
+impl ScheduleExecutor for MultiThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::MultiThreaded
     }
 
-    fn init(&mut self, executable: &ScheduleExecutable) {
+    fn init(&mut self, graph: &ScheduleGraph, analysis: ScheduleGraphAnalysis) {
+        self.executable = ScheduleExecutable::compile(graph, analysis);
+
         let state = self.state.get_mut().unwrap();
         // pre-allocate space
-        let sys_count = executable.system_ids.len();
-        let set_count = executable.set_ids.len();
+        let sys_count = self.executable.system_ids.len();
+        let set_count = self.executable.set_ids.len();
 
         self.system_completion = ConcurrentQueue::bounded(sys_count.max(1));
         self.starting_systems = FixedBitSet::with_capacity(sys_count);
@@ -155,15 +154,15 @@ impl SystemExecutor for MultiThreadedExecutor {
 
         state.system_task_metadata = Vec::with_capacity(sys_count);
         for index in 0..sys_count {
-            let system = executable.systems[index].system.lock();
+            let system = self.executable.systems[index].system.lock();
             state.system_task_metadata.push(SystemTaskMetadata {
                 conflicting_systems: FixedBitSet::with_capacity(sys_count),
                 condition_conflicting_systems: FixedBitSet::with_capacity(sys_count),
-                dependents: executable.system_dependents[index].clone(),
+                dependents: self.executable.system_dependents[index].clone(),
                 is_send: system.is_send(),
                 is_exclusive: system.is_exclusive(),
             });
-            if executable.system_dependencies[index] == 0 {
+            if self.executable.system_dependencies[index] == 0 {
                 self.starting_systems.insert(index);
             }
         }
@@ -172,9 +171,9 @@ impl SystemExecutor for MultiThreadedExecutor {
             #[cfg(feature = "trace")]
             let _span = info_span!("calculate conflicting systems").entered();
             for index1 in 0..sys_count {
-                let system1 = &executable.systems[index1];
+                let system1 = &self.executable.systems[index1];
                 for index2 in 0..index1 {
-                    let system2 = &executable.systems[index2];
+                    let system2 = &self.executable.systems[index2];
                     if !system2.access.is_compatible(&system1.access) {
                         state.system_task_metadata[index1]
                             .conflicting_systems
@@ -186,8 +185,8 @@ impl SystemExecutor for MultiThreadedExecutor {
                 }
 
                 for index2 in 0..sys_count {
-                    let system2 = &executable.systems[index2];
-                    if executable.system_conditions[index1]
+                    let system2 = &self.executable.systems[index2];
+                    if self.executable.system_conditions[index1]
                         .iter()
                         .any(|condition| !system2.access.is_compatible(&condition.access))
                     {
@@ -203,8 +202,8 @@ impl SystemExecutor for MultiThreadedExecutor {
             for set_idx in 0..set_count {
                 let mut conflicting_systems = FixedBitSet::with_capacity(sys_count);
                 for sys_index in 0..sys_count {
-                    let system = &executable.systems[sys_index];
-                    if executable.set_conditions[set_idx]
+                    let system = &self.executable.systems[sys_index];
+                    if self.executable.set_conditions[set_idx]
                         .iter()
                         .any(|condition| !system.access.is_compatible(&condition.access))
                     {
@@ -222,20 +221,19 @@ impl SystemExecutor for MultiThreadedExecutor {
 
     fn run(
         &mut self,
-        executable: &mut ScheduleExecutable,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: ErrorHandler,
     ) {
         let state = self.state.get_mut().unwrap();
         // reset counts
-        if executable.systems.is_empty() {
+        if self.executable.systems.is_empty() {
             return;
         }
         state.num_running_systems = 0;
         state
             .num_dependencies_remaining
-            .clone_from(&executable.system_dependencies);
+            .clone_from(&self.executable.system_dependencies);
         state.ready_systems.clone_from(&self.starting_systems);
 
         // If stepping is enabled, make sure we skip those systems that should
@@ -259,7 +257,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             .map(|e| e.0.clone());
         let thread_executor = thread_executor.as_deref();
 
-        let environment = &Environment::new(self, executable, world);
+        let environment = &Environment::new(self, world);
 
         ComputeTaskPool::get_or_init(TaskPool::default).scope_with_executor(
             false,
@@ -281,7 +279,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         if self.apply_final_deferred {
             // Do one final apply buffers after all systems have completed
             // Commands should be applied while on the scope's thread, not the executor's thread
-            let res = apply_deferred(&state.unapplied_systems, &executable.systems, world);
+            let res = apply_deferred(&state.unapplied_systems, &self.executable.systems, world);
             if let Err(payload) = res {
                 let panic_payload = self.panic_payload.get_mut().unwrap();
                 *panic_payload = Some(payload);
@@ -304,6 +302,14 @@ impl SystemExecutor for MultiThreadedExecutor {
 
     fn set_apply_final_deferred(&mut self, value: bool) {
         self.apply_final_deferred = value;
+    }
+
+    fn check_change_ticks(&mut self, check: CheckChangeTicks) {
+        self.executable.check_change_tick(check);
+    }
+
+    fn apply_deferred(&mut self, world: &mut World) {
+        self.executable.apply_deferred(world);
     }
 }
 
@@ -366,6 +372,7 @@ impl MultiThreadedExecutor {
     /// [`Schedule`]: crate::schedule::Schedule
     pub fn new() -> Self {
         Self {
+            executable: ScheduleExecutable::default(),
             state: Mutex::new(ExecutorState::new()),
             system_completion: ConcurrentQueue::unbounded(),
             starting_systems: FixedBitSet::new(),
@@ -440,7 +447,7 @@ impl ExecutorState {
 
             for system_index in ready_systems.ones() {
                 debug_assert!(!self.running_systems.contains(system_index));
-                let mut system = context.environment.executable.systems[system_index]
+                let mut system = context.environment.executor.executable.systems[system_index]
                     .system
                     .lock();
 
@@ -452,7 +459,7 @@ impl ExecutorState {
                     system.refresh_hotpatch();
                 }
 
-                if !self.can_run(system_index, context.environment.executable) {
+                if !self.can_run(system_index, &context.environment.executor.executable) {
                     // NOTE: exclusive systems with ambiguities are susceptible to
                     // being significantly displaced here (compared to single-threaded order)
                     // if systems after them in topological order can run
@@ -468,7 +475,7 @@ impl ExecutorState {
                     self.should_run(
                         system_index,
                         &mut *system,
-                        context.environment.executable,
+                        &context.environment.executor.executable,
                         context.environment.world_cell,
                         context.error_handler,
                     )
@@ -645,9 +652,9 @@ impl ExecutorState {
     /// - `world` must have permission to access the world data
     ///   used by the specified system.
     unsafe fn spawn_system_task(&mut self, context: &Context, system_index: usize) {
-        let system = &context.environment.executable.systems[system_index].system;
         // Move the full context object into the new future.
         let context = *context;
+        let system = &context.environment.executor.executable.systems[system_index].system;
 
         let system_meta = &self.system_task_metadata[system_index];
 
@@ -689,9 +696,9 @@ impl ExecutorState {
     /// # Safety
     /// Caller must ensure no systems currently have access to the world.
     unsafe fn spawn_exclusive_system_task(&mut self, context: &Context, system_index: usize) {
-        let system = &context.environment.executable.systems[system_index].system;
         // Move the full context object into the new future.
         let context = *context;
+        let system = &context.environment.executor.executable.systems[system_index].system;
 
         if system.lock().is_apply_deferred() {
             // TODO: avoid allocation
@@ -703,7 +710,7 @@ impl ExecutorState {
                 let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = apply_deferred(
                     &unapplied_systems,
-                    &context.environment.executable.systems,
+                    &context.environment.executor.executable.systems,
                     world,
                 );
                 let system = system.lock();

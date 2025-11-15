@@ -227,7 +227,7 @@ impl Schedules {
     }
 }
 
-fn make_executor(kind: ExecutorKind) -> Box<dyn SystemExecutor> {
+fn make_executor(kind: ExecutorKind) -> Box<dyn ScheduleExecutor> {
     match kind {
         ExecutorKind::SingleThreaded => Box::new(SingleThreadedExecutor::new()),
         #[cfg(feature = "std")]
@@ -340,8 +340,7 @@ impl Chain {
 pub struct Schedule {
     label: InternedScheduleLabel,
     graph: ScheduleGraph,
-    executable: ScheduleExecutable,
-    executor: Box<dyn SystemExecutor>,
+    executor: Box<dyn ScheduleExecutor>,
     executor_initialized: bool,
     warnings: Vec<ScheduleBuildWarning>,
 }
@@ -365,7 +364,6 @@ impl Schedule {
         let mut this = Self {
             label: label.intern(),
             graph: ScheduleGraph::new(),
-            executable: ScheduleExecutable::default(),
             executor: make_executor(ExecutorKind::default()),
             executor_initialized: false,
             warnings: Vec::new(),
@@ -535,8 +533,7 @@ impl Schedule {
         let error_handler = world.default_error_handler();
 
         #[cfg(not(feature = "bevy_debug_stepping"))]
-        self.executor
-            .run(&mut self.executable, world, None, error_handler);
+        self.executor.run(world, None, error_handler);
 
         #[cfg(feature = "bevy_debug_stepping")]
         {
@@ -545,12 +542,8 @@ impl Schedule {
                 Some(mut stepping) => stepping.skipped_systems(self),
             };
 
-            self.executor.run(
-                &mut self.executable,
-                world,
-                skip_systems.as_ref(),
-                error_handler,
-            );
+            self.executor
+                .run(world, skip_systems.as_ref(), error_handler);
         }
     }
 
@@ -561,6 +554,10 @@ impl Schedule {
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
         if self.graph.changed {
             self.graph.initialize(world);
+            self.graph.changed = false;
+        }
+
+        if !self.executor_initialized {
             let ignored_ambiguities = world
                 .get_resource_or_init::<Schedules>()
                 .ignored_scheduling_ambiguities
@@ -568,6 +565,9 @@ impl Schedule {
 
             let (analysis, warnings) = self.graph.analyze(world, &ignored_ambiguities)?;
             self.warnings = warnings;
+            self.executor.init(&self.graph, analysis);
+            self.executor_initialized = true;
+
             for warning in &self.warnings {
                 warn!(
                     "{:?} schedule analysis warning: {}",
@@ -575,15 +575,6 @@ impl Schedule {
                     warning.to_string(&self.graph, world)
                 );
             }
-
-            self.executable = ScheduleExecutable::compile(&self.graph, analysis);
-            self.graph.changed = false;
-            self.executor_initialized = false;
-        }
-
-        if !self.executor_initialized {
-            self.executor.init(&self.executable);
-            self.executor_initialized = true;
         }
 
         Ok(())
@@ -599,33 +590,11 @@ impl Schedule {
         &mut self.graph
     }
 
-    /// Returns the [`ScheduleExecutable`].
-    pub(crate) fn executable(&self) -> &ScheduleExecutable {
-        &self.executable
-    }
-
     /// Iterates the change ticks of all systems in the schedule and clamps any older than
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
     pub fn check_change_ticks(&mut self, check: CheckChangeTicks) {
-        for SystemWithAccess { system, .. } in &mut self.executable.systems {
-            let mut system = system.lock();
-            if !system.is_apply_deferred() {
-                system.check_change_tick(check);
-            }
-        }
-
-        for conditions in &mut self.executable.system_conditions {
-            for ConditionWithAccess { condition, .. } in conditions {
-                condition.lock().check_change_tick(check);
-            }
-        }
-
-        for conditions in &mut self.executable.set_conditions {
-            for ConditionWithAccess { condition, .. } in conditions {
-                condition.lock().check_change_tick(check);
-            }
-        }
+        self.executor.check_change_ticks(check);
     }
 
     /// Directly applies any accumulated [`Deferred`](crate::system::Deferred) system parameters (like [`Commands`](crate::prelude::Commands)) to the `world`.
@@ -637,9 +606,7 @@ impl Schedule {
     /// This is used in rendering to extract data from the main world, storing the data in system buffers,
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
-        for SystemWithAccess { system, .. } in &mut self.executable.systems {
-            system.lock().apply_deferred(world);
-        }
+        self.executor.apply_deferred(world);
     }
 
     /// Returns an iterator over all systems in this schedule.

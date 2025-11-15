@@ -689,7 +689,8 @@ impl ScheduleState {
         // if our NodeId list hasn't been populated, copy it over from the
         // schedule
         if self.node_ids.len() != schedule.systems_len() {
-            self.node_ids.clone_from(&schedule.executable().system_ids);
+            // TODO
+            // self.node_ids.clone_from(&schedule.executable().system_ids);
         }
 
         // Now that we have the schedule, apply any pending system behavior

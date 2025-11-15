@@ -31,18 +31,24 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
-/// Types that can run a [`SystemSchedule`] on a [`World`].
-pub(super) trait SystemExecutor: Send + Sync {
+/// Types that can run a [`ScheduleExecutable`] on a [`World`].
+pub(super) trait ScheduleExecutor: Send + Sync {
     fn kind(&self) -> ExecutorKind;
-    fn init(&mut self, executable: &ScheduleExecutable);
+
+    fn init(&mut self, graph: &ScheduleGraph, analysis: ScheduleGraphAnalysis);
+
     fn run(
         &mut self,
-        executable: &mut ScheduleExecutable,
         world: &mut World,
         skip_systems: Option<&FixedBitSet>,
         error_handler: fn(BevyError, ErrorContext),
     );
+
     fn set_apply_final_deferred(&mut self, value: bool);
+
+    fn check_change_ticks(&mut self, check: CheckChangeTicks);
+
+    fn apply_deferred(&mut self, world: &mut World);
 }
 
 /// Specifies how a [`Schedule`](super::Schedule) will be run.
@@ -230,6 +236,48 @@ impl ScheduleExecutable {
             system_dependents,
             sets_with_conditions_of_systems,
             systems_in_sets_with_conditions,
+        }
+    }
+
+    /// Iterates the change ticks of all systems in the schedule and clamps any
+    /// older than [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
+    /// This prevents overflow and thus prevents false positives.
+    pub fn check_change_tick(&mut self, check: CheckChangeTicks) {
+        for SystemWithAccess { system, .. } in &mut self.systems {
+            let mut system = system.lock();
+            if !system.is_apply_deferred() {
+                system.check_change_tick(check);
+            }
+        }
+
+        for conditions in &mut self.system_conditions {
+            for ConditionWithAccess { condition, .. } in conditions {
+                condition.lock().check_change_tick(check);
+            }
+        }
+
+        for conditions in &mut self.set_conditions {
+            for ConditionWithAccess { condition, .. } in conditions {
+                condition.lock().check_change_tick(check);
+            }
+        }
+    }
+
+    /// Directly applies any accumulated [`Deferred`](crate::system::Deferred)
+    /// system parameters (like [`Commands`](crate::prelude::Commands)) to the
+    /// `world`.
+    ///
+    /// Like always, deferred system parameters are applied in the "topological
+    /// sort order" of the schedule graph. As a result, buffers from one system
+    /// are only guaranteed to be applied before those of other systems if there
+    /// is an explicit system ordering between the two systems.
+    ///
+    /// This is used in rendering to extract data from the main world, storing
+    /// the data in system buffers, before applying their buffers in a different
+    /// world.
+    pub fn apply_deferred(&mut self, world: &mut World) {
+        for SystemWithAccess { system, .. } in &mut self.systems {
+            system.lock().apply_deferred(world);
         }
     }
 }
