@@ -7,16 +7,15 @@ use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
-use bevy_platform::collections::{HashMap, HashSet};
-use bevy_utils::{default, TypeIdMap};
 use core::{
     any::{Any, TypeId},
     fmt::{Debug, Write},
 };
-use fixedbitset::FixedBitSet;
+
+use bevy_platform::collections::{HashMap, HashSet};
+use bevy_utils::{default, TypeIdMap};
 use log::{info, warn};
 use pass::ScheduleBuildPassObj;
 use thiserror::Error;
@@ -341,7 +340,7 @@ impl Chain {
 pub struct Schedule {
     label: InternedScheduleLabel,
     graph: ScheduleGraph,
-    executable: SystemSchedule,
+    executable: ScheduleExecutable,
     executor: Box<dyn SystemExecutor>,
     executor_initialized: bool,
     warnings: Vec<ScheduleBuildWarning>,
@@ -366,7 +365,7 @@ impl Schedule {
         let mut this = Self {
             label: label.intern(),
             graph: ScheduleGraph::new(),
-            executable: SystemSchedule::new(),
+            executable: ScheduleExecutable::default(),
             executor: make_executor(ExecutorKind::default()),
             executor_initialized: false,
             warnings: Vec::new(),
@@ -566,12 +565,18 @@ impl Schedule {
                 .get_resource_or_init::<Schedules>()
                 .ignored_scheduling_ambiguities
                 .clone();
-            self.warnings = self.graph.update_schedule(
-                world,
-                &mut self.executable,
-                &ignored_ambiguities,
-                self.label,
-            )?;
+
+            let (analysis, warnings) = self.graph.analyze(world, &ignored_ambiguities)?;
+            self.warnings = warnings;
+            for warning in &self.warnings {
+                warn!(
+                    "{:?} schedule analysis warning: {}",
+                    self.label,
+                    warning.to_string(&self.graph, world)
+                );
+            }
+
+            self.executable = ScheduleExecutable::compile(&self.graph, analysis);
             self.graph.changed = false;
             self.executor_initialized = false;
         }
@@ -594,8 +599,8 @@ impl Schedule {
         &mut self.graph
     }
 
-    /// Returns the [`SystemSchedule`].
-    pub(crate) fn executable(&self) -> &SystemSchedule {
+    /// Returns the [`ScheduleExecutable`].
+    pub(crate) fn executable(&self) -> &ScheduleExecutable {
         &self.executable
     }
 
@@ -1085,18 +1090,15 @@ impl ScheduleGraph {
         self.system_sets.initialize(world);
     }
 
-    /// Builds an execution-optimized [`SystemSchedule`] from the current state
-    /// of the graph. Also returns any warnings that were generated during the
-    /// build process.
+    /// Validates and prepares the schedule graph for compilation.
     ///
-    /// This method also
-    /// - checks for dependency or hierarchy cycles
-    /// - checks for system access conflicts and reports ambiguities
-    pub fn build_schedule(
+    /// This method performs all graph analysis, validation, and preparation work,
+    /// returning the intermediate results needed for compilation.
+    pub fn analyze(
         &mut self,
         world: &mut World,
         ignored_ambiguities: &BTreeSet<ComponentId>,
-    ) -> Result<(SystemSchedule, Vec<ScheduleBuildWarning>), ScheduleBuildError> {
+    ) -> Result<(ScheduleGraphAnalysis, Vec<ScheduleBuildWarning>), ScheduleBuildError> {
         let mut warnings = Vec::new();
 
         // Check system set memberships for cycles.
@@ -1194,152 +1196,32 @@ impl ScheduleGraph {
             }
         }
 
-        // build the schedule
         Ok((
-            self.build_schedule_inner(flat_dependency, hierarchy_analysis),
+            ScheduleGraphAnalysis {
+                flat_dependency,
+                hierarchy_analysis,
+                dependency_analysis,
+                flat_dependency_analysis,
+                flat_ambiguous_with,
+            },
             warnings,
         ))
     }
+}
 
-    fn build_schedule_inner(
-        &self,
-        flat_dependency: Dag<SystemKey>,
-        hierarchy_analysis: DagAnalysis<NodeId>,
-    ) -> SystemSchedule {
-        let dg_system_ids = flat_dependency.get_toposort().unwrap().to_vec();
-        let dg_system_idx_map = dg_system_ids
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, id)| (id, i))
-            .collect::<HashMap<_, _>>();
-
-        let hierarchy_toposort = self.hierarchy.get_toposort().unwrap();
-        let hg_systems = hierarchy_toposort
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(i, id)| Some((i, id.as_system()?)))
-            .collect::<Vec<_>>();
-        let (hg_set_with_conditions_idxs, hg_set_ids): (Vec<_>, Vec<_>) = hierarchy_toposort
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(i, id)| {
-                // ignore system sets that have no conditions
-                // ignore system type sets (already covered, they don't have conditions)
-                let key = id.as_set()?;
-                self.system_sets.has_conditions(key).then_some((i, key))
-            })
-            .unzip();
-
-        let sys_count = self.systems.len();
-        let set_with_conditions_count = hg_set_ids.len();
-        let hg_node_count = self.hierarchy.node_count();
-
-        // get the number of dependencies and the immediate dependents of each system
-        // (needed by multi_threaded executor to run systems in the correct order)
-        let mut system_dependencies = Vec::with_capacity(sys_count);
-        let mut system_dependents = Vec::with_capacity(sys_count);
-        for &sys_key in &dg_system_ids {
-            let num_dependencies = flat_dependency
-                .neighbors_directed(sys_key, Incoming)
-                .count();
-
-            let dependents = flat_dependency
-                .neighbors_directed(sys_key, Outgoing)
-                .map(|dep_id| dg_system_idx_map[&dep_id])
-                .collect::<Vec<_>>();
-
-            system_dependencies.push(num_dependencies);
-            system_dependents.push(dependents);
-        }
-
-        // get the rows and columns of the hierarchy graph's reachability matrix
-        // (needed to we can evaluate conditions in the correct order)
-        let mut systems_in_sets_with_conditions =
-            vec![FixedBitSet::with_capacity(sys_count); set_with_conditions_count];
-        for (i, &row) in hg_set_with_conditions_idxs.iter().enumerate() {
-            let bitset = &mut systems_in_sets_with_conditions[i];
-            for &(col, sys_key) in &hg_systems {
-                let idx = dg_system_idx_map[&sys_key];
-                let is_descendant = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
-                bitset.set(idx, is_descendant);
-            }
-        }
-
-        let mut sets_with_conditions_of_systems =
-            vec![FixedBitSet::with_capacity(set_with_conditions_count); sys_count];
-        for &(col, sys_key) in &hg_systems {
-            let i = dg_system_idx_map[&sys_key];
-            let bitset = &mut sets_with_conditions_of_systems[i];
-            for (idx, &row) in hg_set_with_conditions_idxs
-                .iter()
-                .enumerate()
-                .take_while(|&(_idx, &row)| row < col)
-            {
-                let is_ancestor = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
-                bitset.set(idx, is_ancestor);
-            }
-        }
-
-        SystemSchedule {
-            systems: Vec::with_capacity(sys_count),
-            system_conditions: Vec::with_capacity(sys_count),
-            set_conditions: Vec::with_capacity(set_with_conditions_count),
-            system_ids: dg_system_ids,
-            set_ids: hg_set_ids,
-            system_dependencies,
-            system_dependents,
-            sets_with_conditions_of_systems,
-            systems_in_sets_with_conditions,
-        }
-    }
-
-    /// Updates the `SystemSchedule` from the `ScheduleGraph`.
-    fn update_schedule(
-        &mut self,
-        world: &mut World,
-        schedule: &mut SystemSchedule,
-        ignored_ambiguities: &BTreeSet<ComponentId>,
-        schedule_label: InternedScheduleLabel,
-    ) -> Result<Vec<ScheduleBuildWarning>, ScheduleBuildError> {
-        if !self.systems.is_initialized() || !self.system_sets.is_initialized() {
-            return Err(ScheduleBuildError::Uninitialized);
-        }
-
-        let (new_schedule, warnings) = self.build_schedule(world, ignored_ambiguities)?;
-        *schedule = new_schedule;
-
-        for warning in &warnings {
-            warn!(
-                "{:?} schedule built successfully, however: {}",
-                schedule_label,
-                warning.to_string(self, world)
-            );
-        }
-
-        // Clear existing systems and conditions from schedule
-        schedule.systems.clear();
-        schedule.system_conditions.clear();
-        schedule.set_conditions.clear();
-
-        // Copy systems into new schedule
-        for &key in &schedule.system_ids {
-            let system = self.systems.get(key).unwrap().clone();
-            let conditions = self.systems.get_conditions(key).unwrap().to_vec();
-            schedule.systems.push(system);
-            schedule.system_conditions.push(conditions);
-        }
-
-        // Copy system set conditions into new schedule
-        for &key in &schedule.set_ids {
-            let conditions = self.system_sets.get_conditions(key).unwrap().to_vec();
-            schedule.set_conditions.push(conditions);
-        }
-
-        Ok(warnings)
-    }
+/// Results from validating and preparing the schedule graph for compilation.
+#[non_exhaustive]
+pub struct ScheduleGraphAnalysis {
+    /// Analysis results for the hierarchy graph.
+    pub hierarchy_analysis: DagAnalysis<NodeId>,
+    /// Analysis results for the dependency graph (before flattening).
+    pub dependency_analysis: DagAnalysis<NodeId>,
+    /// The flattened dependency DAG containing only systems (no sets).
+    pub flat_dependency: Dag<SystemKey>,
+    /// Analysis results for the flattened dependency graph.
+    pub flat_dependency_analysis: DagAnalysis<SystemKey>,
+    /// Flattened ambiguity specifications.
+    pub flat_ambiguous_with: UnGraph<SystemKey>,
 }
 
 /// Values returned by [`ScheduleGraph::process_configs`]

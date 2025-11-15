@@ -15,7 +15,7 @@ use crate::{
     error::{ErrorContext, ErrorHandler, Result},
     prelude::Resource,
     schedule::{
-        ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule, SystemWithAccess,
+        ConditionWithAccess, ExecutorKind, ScheduleExecutable, SystemExecutor, SystemWithAccess,
     },
     system::{RunSystemError, System},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -28,19 +28,19 @@ use super::__rust_begin_short_backtrace;
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env> {
     executor: &'env MultiThreadedExecutor,
-    schedule: &'env SystemSchedule,
+    executable: &'env ScheduleExecutable,
     world_cell: UnsafeWorldCell<'env>,
 }
 
 impl<'env> Environment<'env> {
     fn new(
         executor: &'env MultiThreadedExecutor,
-        schedule: &'env mut SystemSchedule,
+        executable: &'env ScheduleExecutable,
         world: &'env mut World,
     ) -> Self {
         Environment {
             executor,
-            schedule,
+            executable,
             world_cell: world.as_unsafe_world_cell(),
         }
     }
@@ -137,11 +137,11 @@ impl SystemExecutor for MultiThreadedExecutor {
         ExecutorKind::MultiThreaded
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, executable: &ScheduleExecutable) {
         let state = self.state.get_mut().unwrap();
         // pre-allocate space
-        let sys_count = schedule.system_ids.len();
-        let set_count = schedule.set_ids.len();
+        let sys_count = executable.system_ids.len();
+        let set_count = executable.set_ids.len();
 
         self.system_completion = ConcurrentQueue::bounded(sys_count.max(1));
         self.starting_systems = FixedBitSet::with_capacity(sys_count);
@@ -155,15 +155,15 @@ impl SystemExecutor for MultiThreadedExecutor {
 
         state.system_task_metadata = Vec::with_capacity(sys_count);
         for index in 0..sys_count {
-            let system = schedule.systems[index].system.lock();
+            let system = executable.systems[index].system.lock();
             state.system_task_metadata.push(SystemTaskMetadata {
                 conflicting_systems: FixedBitSet::with_capacity(sys_count),
                 condition_conflicting_systems: FixedBitSet::with_capacity(sys_count),
-                dependents: schedule.system_dependents[index].clone(),
+                dependents: executable.system_dependents[index].clone(),
                 is_send: system.is_send(),
                 is_exclusive: system.is_exclusive(),
             });
-            if schedule.system_dependencies[index] == 0 {
+            if executable.system_dependencies[index] == 0 {
                 self.starting_systems.insert(index);
             }
         }
@@ -172,9 +172,9 @@ impl SystemExecutor for MultiThreadedExecutor {
             #[cfg(feature = "trace")]
             let _span = info_span!("calculate conflicting systems").entered();
             for index1 in 0..sys_count {
-                let system1 = &schedule.systems[index1];
+                let system1 = &executable.systems[index1];
                 for index2 in 0..index1 {
-                    let system2 = &schedule.systems[index2];
+                    let system2 = &executable.systems[index2];
                     if !system2.access.is_compatible(&system1.access) {
                         state.system_task_metadata[index1]
                             .conflicting_systems
@@ -186,8 +186,8 @@ impl SystemExecutor for MultiThreadedExecutor {
                 }
 
                 for index2 in 0..sys_count {
-                    let system2 = &schedule.systems[index2];
-                    if schedule.system_conditions[index1]
+                    let system2 = &executable.systems[index2];
+                    if executable.system_conditions[index1]
                         .iter()
                         .any(|condition| !system2.access.is_compatible(&condition.access))
                     {
@@ -203,8 +203,8 @@ impl SystemExecutor for MultiThreadedExecutor {
             for set_idx in 0..set_count {
                 let mut conflicting_systems = FixedBitSet::with_capacity(sys_count);
                 for sys_index in 0..sys_count {
-                    let system = &schedule.systems[sys_index];
-                    if schedule.set_conditions[set_idx]
+                    let system = &executable.systems[sys_index];
+                    if executable.set_conditions[set_idx]
                         .iter()
                         .any(|condition| !system.access.is_compatible(&condition.access))
                     {
@@ -222,20 +222,20 @@ impl SystemExecutor for MultiThreadedExecutor {
 
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        executable: &mut ScheduleExecutable,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: ErrorHandler,
     ) {
         let state = self.state.get_mut().unwrap();
         // reset counts
-        if schedule.systems.is_empty() {
+        if executable.systems.is_empty() {
             return;
         }
         state.num_running_systems = 0;
         state
             .num_dependencies_remaining
-            .clone_from(&schedule.system_dependencies);
+            .clone_from(&executable.system_dependencies);
         state.ready_systems.clone_from(&self.starting_systems);
 
         // If stepping is enabled, make sure we skip those systems that should
@@ -259,7 +259,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             .map(|e| e.0.clone());
         let thread_executor = thread_executor.as_deref();
 
-        let environment = &Environment::new(self, schedule, world);
+        let environment = &Environment::new(self, executable, world);
 
         ComputeTaskPool::get_or_init(TaskPool::default).scope_with_executor(
             false,
@@ -281,7 +281,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         if self.apply_final_deferred {
             // Do one final apply buffers after all systems have completed
             // Commands should be applied while on the scope's thread, not the executor's thread
-            let res = apply_deferred(&state.unapplied_systems, &schedule.systems, world);
+            let res = apply_deferred(&state.unapplied_systems, &executable.systems, world);
             if let Err(payload) = res {
                 let panic_payload = self.panic_payload.get_mut().unwrap();
                 *panic_payload = Some(payload);
@@ -440,7 +440,7 @@ impl ExecutorState {
 
             for system_index in ready_systems.ones() {
                 debug_assert!(!self.running_systems.contains(system_index));
-                let mut system = context.environment.schedule.systems[system_index]
+                let mut system = context.environment.executable.systems[system_index]
                     .system
                     .lock();
 
@@ -452,7 +452,7 @@ impl ExecutorState {
                     system.refresh_hotpatch();
                 }
 
-                if !self.can_run(system_index, context.environment.schedule) {
+                if !self.can_run(system_index, context.environment.executable) {
                     // NOTE: exclusive systems with ambiguities are susceptible to
                     // being significantly displaced here (compared to single-threaded order)
                     // if systems after them in topological order can run
@@ -468,7 +468,7 @@ impl ExecutorState {
                     self.should_run(
                         system_index,
                         &mut *system,
-                        context.environment.schedule,
+                        context.environment.executable,
                         context.environment.world_cell,
                         context.error_handler,
                     )
@@ -511,7 +511,7 @@ impl ExecutorState {
         self.ready_systems_copy = ready_systems;
     }
 
-    fn can_run(&mut self, system_index: usize, schedule: &SystemSchedule) -> bool {
+    fn can_run(&mut self, system_index: usize, executable: &ScheduleExecutable) -> bool {
         let system_meta = &self.system_task_metadata[system_index];
         if system_meta.is_exclusive && self.num_running_systems > 0 {
             return false;
@@ -522,8 +522,8 @@ impl ExecutorState {
         }
 
         // TODO: an earlier out if world's archetypes did not change
-        for set_idx in
-            schedule.sets_with_conditions_of_systems[system_index].difference(&self.evaluated_sets)
+        for set_idx in executable.sets_with_conditions_of_systems[system_index]
+            .difference(&self.evaluated_sets)
         {
             if !self.set_condition_conflicting_systems[set_idx].is_disjoint(&self.running_systems) {
                 return false;
@@ -556,13 +556,13 @@ impl ExecutorState {
         &mut self,
         system_index: usize,
         system: &mut dyn System<In = (), Out = ()>,
-        schedule: &SystemSchedule,
+        executable: &ScheduleExecutable,
         world: UnsafeWorldCell,
         error_handler: ErrorHandler,
     ) -> bool {
         let mut should_run = !self.skipped_systems.contains(system_index);
 
-        for set_idx in schedule.sets_with_conditions_of_systems[system_index].ones() {
+        for set_idx in executable.sets_with_conditions_of_systems[system_index].ones() {
             if self.evaluated_sets.contains(set_idx) {
                 continue;
             }
@@ -573,7 +573,7 @@ impl ExecutorState {
             //   required by the conditions.
             let set_conditions_met = unsafe {
                 evaluate_and_fold_conditions(
-                    &schedule.set_conditions[set_idx],
+                    &executable.set_conditions[set_idx],
                     world,
                     error_handler,
                     &*system,
@@ -583,7 +583,7 @@ impl ExecutorState {
 
             if !set_conditions_met {
                 self.skipped_systems
-                    .union_with(&schedule.systems_in_sets_with_conditions[set_idx]);
+                    .union_with(&executable.systems_in_sets_with_conditions[set_idx]);
             }
 
             should_run &= set_conditions_met;
@@ -596,7 +596,7 @@ impl ExecutorState {
         //   required by the conditions.
         let system_conditions_met = unsafe {
             evaluate_and_fold_conditions(
-                &schedule.system_conditions[system_index],
+                &executable.system_conditions[system_index],
                 world,
                 error_handler,
                 system,
@@ -645,7 +645,7 @@ impl ExecutorState {
     /// - `world` must have permission to access the world data
     ///   used by the specified system.
     unsafe fn spawn_system_task(&mut self, context: &Context, system_index: usize) {
-        let system = &context.environment.schedule.systems[system_index].system;
+        let system = &context.environment.executable.systems[system_index].system;
         // Move the full context object into the new future.
         let context = *context;
 
@@ -689,7 +689,7 @@ impl ExecutorState {
     /// # Safety
     /// Caller must ensure no systems currently have access to the world.
     unsafe fn spawn_exclusive_system_task(&mut self, context: &Context, system_index: usize) {
-        let system = &context.environment.schedule.systems[system_index].system;
+        let system = &context.environment.executable.systems[system_index].system;
         // Move the full context object into the new future.
         let context = *context;
 
@@ -703,7 +703,7 @@ impl ExecutorState {
                 let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = apply_deferred(
                     &unapplied_systems,
-                    &context.environment.schedule.systems,
+                    &context.environment.executable.systems,
                     world,
                 );
                 let system = system.lock();

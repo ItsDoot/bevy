@@ -3,6 +3,7 @@ mod multi_threaded;
 mod single_threaded;
 
 use alloc::{vec, vec::Vec};
+use bevy_platform::collections::HashMap;
 use bevy_utils::prelude::DebugName;
 use core::any::TypeId;
 
@@ -19,8 +20,12 @@ use crate::{
     prelude::{IntoSystemSet, SystemSet},
     query::FilteredAccessSet,
     schedule::{
-        ConditionWithAccess, InternedSystemSet, SystemKey, SystemSetKey, SystemTypeSet,
-        SystemWithAccess,
+        graph::{
+            index,
+            Direction::{Incoming, Outgoing},
+        },
+        ConditionWithAccess, InternedSystemSet, ScheduleGraph, ScheduleGraphAnalysis, SystemKey,
+        SystemSetKey, SystemTypeSet, SystemWithAccess,
     },
     system::{RunSystemError, System, SystemIn, SystemParamValidationError, SystemStateFlags},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
@@ -29,10 +34,10 @@ use crate::{
 /// Types that can run a [`SystemSchedule`] on a [`World`].
 pub(super) trait SystemExecutor: Send + Sync {
     fn kind(&self) -> ExecutorKind;
-    fn init(&mut self, schedule: &SystemSchedule);
+    fn init(&mut self, executable: &ScheduleExecutable);
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        executable: &mut ScheduleExecutable,
         world: &mut World,
         skip_systems: Option<&FixedBitSet>,
         error_handler: fn(BevyError, ErrorContext),
@@ -66,13 +71,15 @@ pub enum ExecutorKind {
     MultiThreaded,
 }
 
-/// Holds systems and conditions of a [`Schedule`](super::Schedule) sorted in topological order
-/// (along with dependency information for `multi_threaded` execution).
+/// Holds systems and conditions of a [`Schedule`](super::Schedule) sorted in
+/// topological order (along with dependency information for `multi_threaded`
+/// execution).
 ///
-/// Since the arrays are sorted in the same order, elements are referenced by their index.
-/// [`FixedBitSet`] is used as a smaller, more efficient substitute of `HashSet<usize>`.
+/// Since the arrays are sorted in the same order, elements are referenced by
+/// their index. [`FixedBitSet`] is used as a smaller, more efficient substitute
+/// of `HashSet<usize>`.
 #[derive(Default)]
-pub struct SystemSchedule {
+pub struct ScheduleExecutable {
     /// List of system node ids.
     pub(super) system_ids: Vec<SystemKey>,
     /// Indexed by system node id.
@@ -107,19 +114,122 @@ pub struct SystemSchedule {
     pub(super) systems_in_sets_with_conditions: Vec<FixedBitSet>,
 }
 
-impl SystemSchedule {
-    /// Creates an empty [`SystemSchedule`].
-    pub const fn new() -> Self {
+impl ScheduleExecutable {
+    /// Builds an execution-optimized [`SystemSchedule`] from the current state
+    /// of the graph and its analysis.
+    pub fn compile(
+        graph: &ScheduleGraph,
+        ScheduleGraphAnalysis {
+            flat_dependency,
+            hierarchy_analysis,
+            ..
+        }: ScheduleGraphAnalysis,
+    ) -> Self {
+        let dg_system_ids = flat_dependency.get_toposort().unwrap().to_vec();
+        let dg_system_idx_map = dg_system_ids
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, id)| (id, i))
+            .collect::<HashMap<_, _>>();
+
+        let hierarchy_toposort = graph.hierarchy().get_toposort().unwrap();
+        let hg_systems = hierarchy_toposort
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(i, id)| Some((i, id.as_system()?)))
+            .collect::<Vec<_>>();
+        let (hg_set_with_conditions_idxs, hg_set_ids): (Vec<_>, Vec<_>) = hierarchy_toposort
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(i, id)| {
+                // ignore system sets that have no conditions
+                // ignore system type sets (already covered, they don't have conditions)
+                let key = id.as_set()?;
+                graph.system_sets.has_conditions(key).then_some((i, key))
+            })
+            .unzip();
+
+        let sys_count = graph.systems.len();
+        let set_with_conditions_count = hg_set_ids.len();
+        let hg_node_count = graph.hierarchy().node_count();
+
+        // get the number of dependencies and the immediate dependents of each system
+        // (needed by multi_threaded executor to run systems in the correct order)
+        let mut system_dependencies = Vec::with_capacity(sys_count);
+        let mut system_dependents = Vec::with_capacity(sys_count);
+        for &sys_key in &dg_system_ids {
+            let num_dependencies = flat_dependency
+                .neighbors_directed(sys_key, Incoming)
+                .count();
+
+            let dependents = flat_dependency
+                .neighbors_directed(sys_key, Outgoing)
+                .map(|dep_id| dg_system_idx_map[&dep_id])
+                .collect::<Vec<_>>();
+
+            system_dependencies.push(num_dependencies);
+            system_dependents.push(dependents);
+        }
+
+        // get the rows and columns of the hierarchy graph's reachability matrix
+        // (needed to we can evaluate conditions in the correct order)
+        let mut systems_in_sets_with_conditions =
+            vec![FixedBitSet::with_capacity(sys_count); set_with_conditions_count];
+        for (i, &row) in hg_set_with_conditions_idxs.iter().enumerate() {
+            let bitset = &mut systems_in_sets_with_conditions[i];
+            for &(col, sys_key) in &hg_systems {
+                let idx = dg_system_idx_map[&sys_key];
+                let is_descendant = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
+                bitset.set(idx, is_descendant);
+            }
+        }
+
+        let mut sets_with_conditions_of_systems =
+            vec![FixedBitSet::with_capacity(set_with_conditions_count); sys_count];
+        for &(col, sys_key) in &hg_systems {
+            let i = dg_system_idx_map[&sys_key];
+            let bitset = &mut sets_with_conditions_of_systems[i];
+            for (idx, &row) in hg_set_with_conditions_idxs
+                .iter()
+                .enumerate()
+                .take_while(|&(_idx, &row)| row < col)
+            {
+                let is_ancestor = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
+                bitset.set(idx, is_ancestor);
+            }
+        }
+
+        let mut systems = Vec::with_capacity(sys_count);
+        let mut system_conditions = Vec::with_capacity(sys_count);
+        let mut set_conditions = Vec::with_capacity(set_with_conditions_count);
+
+        // Copy systems into new schedule
+        for &key in &dg_system_ids {
+            let system = graph.systems.get(key).unwrap().clone();
+            let conditions = graph.systems.get_conditions(key).unwrap().to_vec();
+            systems.push(system);
+            system_conditions.push(conditions);
+        }
+
+        // Copy system set conditions into new schedule
+        for &key in &hg_set_ids {
+            let conditions = graph.system_sets.get_conditions(key).unwrap().to_vec();
+            set_conditions.push(conditions);
+        }
+
         Self {
-            systems: Vec::new(),
-            system_conditions: Vec::new(),
-            set_conditions: Vec::new(),
-            system_ids: Vec::new(),
-            set_ids: Vec::new(),
-            system_dependencies: Vec::new(),
-            system_dependents: Vec::new(),
-            sets_with_conditions_of_systems: Vec::new(),
-            systems_in_sets_with_conditions: Vec::new(),
+            systems,
+            system_conditions,
+            set_conditions,
+            system_ids: dg_system_ids,
+            set_ids: hg_set_ids,
+            system_dependencies,
+            system_dependents,
+            sets_with_conditions_of_systems,
+            systems_in_sets_with_conditions,
         }
     }
 }
