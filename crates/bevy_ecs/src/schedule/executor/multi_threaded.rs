@@ -17,7 +17,7 @@ use crate::{
     prelude::Resource,
     schedule::{
         is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
-        SystemWithAccess,
+        SystemSetKey, SystemWithAccess,
     },
     system::{RunSystemError, ScheduleSystem},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -318,6 +318,38 @@ impl SystemExecutor for MultiThreadedExecutor {
         state.evaluated_sets.clear();
         state.skipped_systems.clear();
         state.completed_systems.clear();
+    }
+
+    fn run_subgraph(
+        &mut self,
+        schedule: &mut SystemSchedule,
+        world: &mut World,
+        set: SystemSetKey,
+        skip_systems: Option<&FixedBitSet>,
+        error_handler: ErrorHandler,
+    ) {
+        // Get the systems in the set
+        let systems_in_set = schedule
+            .systems_in_sets
+            .get(&set)
+            .expect("System set not found in schedule.");
+
+        let state = self.state.get_mut().unwrap();
+        // Mark all systems in the set as completed (waiting to be flipped)
+        state.completed_systems = systems_in_set.clone();
+        // Flip all bits to get the systems not in the set
+        state.completed_systems.toggle_range(..);
+        // Signal dependents of systems not in the set, as though they had run
+        state.signal_all_dependents();
+
+        // Temporarily update starting_systems to only include systems in the set
+        let original_starting_systems = self.starting_systems.clone();
+        self.starting_systems.intersect_with(systems_in_set);
+
+        self.run(schedule, world, skip_systems, error_handler);
+
+        // Restore original starting_systems
+        self.starting_systems = original_starting_systems;
     }
 
     fn set_apply_final_deferred(&mut self, value: bool) {
@@ -792,6 +824,19 @@ impl ExecutorState {
             *remaining -= 1;
             if *remaining == 0 && !self.completed_systems.contains(dep_idx) {
                 self.ready_systems.insert(dep_idx);
+            }
+        }
+    }
+
+    fn signal_all_dependents(&mut self) {
+        for system_index in self.completed_systems.ones() {
+            for &dep_idx in &self.system_task_metadata[system_index].dependents {
+                let remaining = &mut self.num_dependencies_remaining[dep_idx];
+                debug_assert!(*remaining >= 1);
+                *remaining -= 1;
+                if *remaining == 0 && !self.completed_systems.contains(dep_idx) {
+                    self.ready_systems.insert(dep_idx);
+                }
             }
         }
     }

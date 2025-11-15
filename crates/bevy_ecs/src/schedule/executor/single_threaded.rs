@@ -13,6 +13,7 @@ use crate::{
     error::{ErrorContext, ErrorHandler},
     schedule::{
         is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
+        SystemSetKey,
     },
     system::{RunSystemError, ScheduleSystem},
     world::World,
@@ -173,6 +174,27 @@ impl SystemExecutor for SingleThreadedExecutor {
         }
         self.evaluated_sets.clear();
         self.completed_systems.clear();
+    }
+
+    fn run_subgraph(
+        &mut self,
+        schedule: &mut SystemSchedule,
+        world: &mut World,
+        set: SystemSetKey,
+        skip_systems: Option<&FixedBitSet>,
+        error_handler: ErrorHandler,
+    ) {
+        // Get the systems in the set
+        let systems_in_set = schedule
+            .systems_in_sets
+            .get(&set)
+            .expect("System set not found in schedule.");
+        // Mark all systems in the set as completed (waiting to be flipped)
+        self.completed_systems = systems_in_set.clone();
+        // Flip all bits to get the systems not in the set
+        self.completed_systems.toggle_range(..);
+
+        self.run(schedule, world, skip_systems, error_handler);
     }
 
     fn set_apply_final_deferred(&mut self, apply_final_deferred: bool) {

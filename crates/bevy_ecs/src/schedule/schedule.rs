@@ -555,6 +555,67 @@ impl Schedule {
         }
     }
 
+    /// Runs all systems in the specified system set on the `world`, using its current execution strategy.
+    pub fn run_system_set<M>(&mut self, world: &mut World, set: impl IntoSystemSet<M>) {
+        #[cfg(feature = "trace")]
+        let _span = info_span!("schedule", name = ?self.label).entered();
+
+        world.check_change_ticks();
+        self.initialize(world).unwrap_or_else(|e| {
+            panic!(
+                "Error when initializing schedule {:?}: {}",
+                self.label,
+                e.to_string(self.graph(), world)
+            )
+        });
+
+        let set = set.into_system_set().intern();
+        let Some(set_key) = self.graph.system_sets.get_key(set) else {
+            return;
+        };
+
+        self.executable
+            .systems_in_sets
+            .entry(set_key)
+            .or_insert_with(|| {
+                let systems_in_set = self.graph.systems_in_set(set).unwrap_or_else(|e| {
+                    panic!(
+                        "Error when retrieving systems in set {:?} for schedule {:?}: {}",
+                        set, self.label, e
+                    )
+                });
+                let mut systems = FixedBitSet::with_capacity(self.executable.systems.len());
+                for (index, key) in self.executable.system_ids.iter().enumerate() {
+                    if systems_in_set.contains(key) {
+                        systems.insert(index);
+                    }
+                }
+                systems
+            });
+
+        let error_handler = world.default_error_handler();
+
+        #[cfg(not(feature = "bevy_debug_stepping"))]
+        self.executor
+            .run_subgraph(&mut self.executable, world, set_key, None, error_handler);
+
+        #[cfg(feature = "bevy_debug_stepping")]
+        {
+            let skip_systems = match world.get_resource_mut::<Stepping>() {
+                None => None,
+                Some(mut stepping) => stepping.skipped_systems(self),
+            };
+
+            self.executor.run_subgraph(
+                &mut self.executable,
+                world,
+                set_key,
+                skip_systems.as_ref(),
+                error_handler,
+            );
+        }
+    }
+
     /// Initializes any newly-added systems and conditions, rebuilds the executable schedule,
     /// and re-initializes the executor.
     ///
@@ -1303,6 +1364,7 @@ impl ScheduleGraph {
             system_dependents,
             sets_with_conditions_of_systems,
             systems_in_sets_with_conditions,
+            systems_in_sets: HashMap::new(),
         }
     }
 
@@ -2566,5 +2628,74 @@ mod tests {
         assert!(result.is_ok());
         let conflicts = schedule.graph().conflicting_systems();
         assert!(conflicts.is_empty());
+    }
+
+    mod run_system_set {
+        use bevy_ecs_macros::SystemSet;
+
+        use crate::{
+            prelude::{IntoScheduleConfigs, Resource, Schedule},
+            schedule::ExecutorKind,
+            system::ResMut,
+            world::World,
+        };
+
+        #[derive(SystemSet, Clone, Copy, PartialEq, Eq, Debug, Hash)]
+        enum SystemSets {
+            Foo,
+            Bar,
+            Baz,
+        }
+
+        #[derive(Resource)]
+        struct Counter(usize);
+
+        fn increment_counter(mut counter: ResMut<Counter>) {
+            counter.0 += 1;
+        }
+
+        #[test]
+        fn test_single_threaded() {
+            let mut schedule = Schedule::default();
+            schedule.set_executor_kind(ExecutorKind::SingleThreaded);
+            schedule.add_systems((
+                increment_counter.in_set(SystemSets::Foo),
+                (increment_counter, increment_counter).in_set(SystemSets::Bar),
+            ));
+
+            let mut world = World::new();
+            world.insert_resource(Counter(0));
+
+            schedule.run_system_set(&mut world, SystemSets::Foo);
+            assert_eq!(world.get_resource::<Counter>().unwrap().0, 1);
+
+            schedule.run_system_set(&mut world, SystemSets::Bar);
+            assert_eq!(world.get_resource::<Counter>().unwrap().0, 3);
+
+            schedule.run_system_set(&mut world, SystemSets::Baz);
+            assert_eq!(world.get_resource::<Counter>().unwrap().0, 3);
+        }
+
+        #[test]
+        fn test_multi_threaded() {
+            let mut schedule = Schedule::default();
+            schedule.set_executor_kind(ExecutorKind::MultiThreaded);
+            schedule.add_systems((
+                increment_counter.in_set(SystemSets::Foo),
+                (increment_counter, increment_counter).in_set(SystemSets::Bar),
+            ));
+
+            let mut world = World::new();
+            world.insert_resource(Counter(0));
+
+            schedule.run_system_set(&mut world, SystemSets::Foo);
+            assert_eq!(world.get_resource::<Counter>().unwrap().0, 1);
+
+            schedule.run_system_set(&mut world, SystemSets::Bar);
+            assert_eq!(world.get_resource::<Counter>().unwrap().0, 3);
+
+            schedule.run_system_set(&mut world, SystemSets::Baz);
+            assert_eq!(world.get_resource::<Counter>().unwrap().0, 3);
+        }
     }
 }

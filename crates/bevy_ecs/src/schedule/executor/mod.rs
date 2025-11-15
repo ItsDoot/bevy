@@ -3,6 +3,7 @@ mod multi_threaded;
 mod single_threaded;
 
 use alloc::{vec, vec::Vec};
+use bevy_platform::collections::HashMap;
 use bevy_utils::prelude::DebugName;
 use core::any::TypeId;
 
@@ -29,7 +30,9 @@ use crate::{
 /// Types that can run a [`SystemSchedule`] on a [`World`].
 pub(super) trait SystemExecutor: Send + Sync {
     fn kind(&self) -> ExecutorKind;
+
     fn init(&mut self, schedule: &SystemSchedule);
+
     fn run(
         &mut self,
         schedule: &mut SystemSchedule,
@@ -37,6 +40,16 @@ pub(super) trait SystemExecutor: Send + Sync {
         skip_systems: Option<&FixedBitSet>,
         error_handler: fn(BevyError, ErrorContext),
     );
+
+    fn run_subgraph(
+        &mut self,
+        schedule: &mut SystemSchedule,
+        world: &mut World,
+        set: SystemSetKey,
+        skip_systems: Option<&FixedBitSet>,
+        error_handler: fn(BevyError, ErrorContext),
+    );
+
     fn set_apply_final_deferred(&mut self, value: bool);
 }
 
@@ -105,6 +118,9 @@ pub struct SystemSchedule {
     ///
     /// If a set doesn't run because of its conditions, this is used to skip all systems in it.
     pub(super) systems_in_sets_with_conditions: Vec<FixedBitSet>,
+    /// Sparse mapping of system set id to systems in the set, used for running
+    /// subgraphs.
+    pub(super) systems_in_sets: HashMap<SystemSetKey, FixedBitSet>,
 }
 
 impl SystemSchedule {
@@ -120,6 +136,7 @@ impl SystemSchedule {
             system_dependents: Vec::new(),
             sets_with_conditions_of_systems: Vec::new(),
             systems_in_sets_with_conditions: Vec::new(),
+            systems_in_sets: HashMap::new(),
         }
     }
 }
