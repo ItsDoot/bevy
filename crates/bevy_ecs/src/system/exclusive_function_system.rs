@@ -320,9 +320,9 @@ all_tuples!(impl_exclusive_system_function, 0, 16, F);
 
 #[cfg(test)]
 mod tests {
-    use crate::system::input::SystemInput;
-
     use super::*;
+    use crate::system::input::SystemInput;
+    use core::any::Any;
 
     #[test]
     fn into_system_type_id_consistency() {

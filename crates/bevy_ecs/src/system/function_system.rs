@@ -924,6 +924,7 @@ all_tuples!(impl_system_function, 0, 16, F);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::any::Any;
 
     #[test]
     fn into_system_type_id_consistency() {

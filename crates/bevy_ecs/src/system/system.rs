@@ -17,7 +17,7 @@ use crate::{
 };
 
 use alloc::{boxed::Box, vec::Vec};
-use core::any::{Any, TypeId};
+use core::any::Any;
 
 use super::{IntoSystem, SystemParamValidationError};
 
@@ -45,7 +45,7 @@ bitflags! {
 /// It's possible to specify explicit execution order between specific systems,
 /// see [`IntoScheduleConfigs`](crate::schedule::IntoScheduleConfigs).
 #[diagnostic::on_unimplemented(message = "`{Self}` is not a system", label = "invalid system")]
-pub trait System: Send + Sync + 'static {
+pub trait System: Send + Sync + Any {
     /// The system's input.
     type In: SystemInput;
     /// The system's output.
@@ -53,11 +53,6 @@ pub trait System: Send + Sync + 'static {
 
     /// Returns the system's name.
     fn name(&self) -> DebugName;
-    /// Returns the [`TypeId`] of the underlying system type.
-    #[inline]
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
 
     /// Returns the [`SystemStateFlags`] of the system.
     fn flags(&self) -> SystemStateFlags;
