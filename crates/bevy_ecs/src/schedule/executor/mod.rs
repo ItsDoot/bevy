@@ -2,7 +2,7 @@
 mod multi_threaded;
 mod single_threaded;
 
-use alloc::{vec, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
 use bevy_utils::prelude::DebugName;
 use core::any::TypeId;
 
@@ -74,52 +74,52 @@ pub enum ExecutorKind {
 #[derive(Default)]
 pub struct SystemSchedule {
     /// List of system node ids.
-    pub(super) system_ids: Vec<SystemKey>,
+    pub(super) system_ids: Box<[SystemKey]>,
     /// Indexed by system node id.
-    pub(super) systems: Vec<SystemWithAccess>,
+    pub(super) systems: Box<[SystemWithAccess]>,
     /// Indexed by system node id.
-    pub(super) system_conditions: Vec<Vec<ConditionWithAccess>>,
+    pub(super) system_conditions: Box<[Box<[ConditionWithAccess]>]>,
     /// Indexed by system node id.
     /// Number of systems that the system immediately depends on.
     #[cfg_attr(
         not(feature = "std"),
         expect(dead_code, reason = "currently only used with the std feature")
     )]
-    pub(super) system_dependencies: Vec<usize>,
+    pub(super) system_dependencies: Box<[usize]>,
     /// Indexed by system node id.
     /// List of systems that immediately depend on the system.
     #[cfg_attr(
         not(feature = "std"),
         expect(dead_code, reason = "currently only used with the std feature")
     )]
-    pub(super) system_dependents: Vec<Vec<usize>>,
+    pub(super) system_dependents: Box<[Box<[usize]>]>,
     /// Indexed by system node id.
     /// List of sets containing the system that have conditions
-    pub(super) sets_with_conditions_of_systems: Vec<FixedBitSet>,
+    pub(super) sets_with_conditions_of_systems: Box<[FixedBitSet]>,
     /// List of system set node ids.
-    pub(super) set_ids: Vec<SystemSetKey>,
+    pub(super) set_ids: Box<[SystemSetKey]>,
     /// Indexed by system set node id.
-    pub(super) set_conditions: Vec<Vec<ConditionWithAccess>>,
+    pub(super) set_conditions: Box<[Box<[ConditionWithAccess]>]>,
     /// Indexed by system set node id.
     /// List of systems that are in sets that have conditions.
     ///
     /// If a set doesn't run because of its conditions, this is used to skip all systems in it.
-    pub(super) systems_in_sets_with_conditions: Vec<FixedBitSet>,
+    pub(super) systems_in_sets_with_conditions: Box<[FixedBitSet]>,
 }
 
 impl SystemSchedule {
     /// Creates an empty [`SystemSchedule`].
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            systems: Vec::new(),
-            system_conditions: Vec::new(),
-            set_conditions: Vec::new(),
-            system_ids: Vec::new(),
-            set_ids: Vec::new(),
-            system_dependencies: Vec::new(),
-            system_dependents: Vec::new(),
-            sets_with_conditions_of_systems: Vec::new(),
-            systems_in_sets_with_conditions: Vec::new(),
+            systems: Box::new([]),
+            system_conditions: Box::new([]),
+            set_conditions: Box::new([]),
+            system_ids: Box::new([]),
+            set_ids: Box::new([]),
+            system_dependencies: Box::new([]),
+            system_dependents: Box::new([]),
+            sets_with_conditions_of_systems: Box::new([]),
+            systems_in_sets_with_conditions: Box::new([]),
         }
     }
 }

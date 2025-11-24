@@ -344,7 +344,7 @@ pub struct Schedule {
     executable: SystemSchedule,
     executor: Box<dyn SystemExecutor>,
     executor_initialized: bool,
-    warnings: Vec<ScheduleBuildWarning>,
+    warnings: Option<Box<[ScheduleBuildWarning]>>,
 }
 
 #[derive(ScheduleLabel, Hash, PartialEq, Eq, Debug, Clone)]
@@ -369,7 +369,7 @@ impl Schedule {
             executable: SystemSchedule::new(),
             executor: make_executor(ExecutorKind::default()),
             executor_initialized: false,
-            warnings: Vec::new(),
+            warnings: None,
         };
         // Call `set_build_settings` to add any default build passes
         this.set_build_settings(Default::default());
@@ -566,12 +566,16 @@ impl Schedule {
                 .get_resource_or_init::<Schedules>()
                 .ignored_scheduling_ambiguities
                 .clone();
-            self.warnings = self.graph.update_schedule(
-                world,
-                &mut self.executable,
-                &ignored_ambiguities,
-                self.label,
-            )?;
+            self.warnings = Some(
+                self.graph
+                    .update_schedule(
+                        world,
+                        &mut self.executable,
+                        &ignored_ambiguities,
+                        self.label,
+                    )?
+                    .into_boxed_slice(),
+            );
             self.graph.changed = false;
             self.executor_initialized = false;
         }
@@ -670,7 +674,7 @@ impl Schedule {
     /// Returns warnings that were generated during the last call to
     /// [`Schedule::initialize`].
     pub fn warnings(&self) -> &[ScheduleBuildWarning] {
-        &self.warnings
+        self.warnings.as_deref().unwrap_or(&[])
     }
 }
 
@@ -1257,7 +1261,7 @@ impl ScheduleGraph {
             let dependents = flat_dependency
                 .neighbors_directed(sys_key, Outgoing)
                 .map(|dep_id| dg_system_idx_map[&dep_id])
-                .collect::<Vec<_>>();
+                .collect::<Box<[_]>>();
 
             system_dependencies.push(num_dependencies);
             system_dependents.push(dependents);
@@ -1292,15 +1296,15 @@ impl ScheduleGraph {
         }
 
         SystemSchedule {
-            systems: Vec::with_capacity(sys_count),
-            system_conditions: Vec::with_capacity(sys_count),
-            set_conditions: Vec::with_capacity(set_with_conditions_count),
-            system_ids: dg_system_ids,
-            set_ids: hg_set_ids,
-            system_dependencies,
-            system_dependents,
-            sets_with_conditions_of_systems,
-            systems_in_sets_with_conditions,
+            systems: Vec::with_capacity(sys_count).into_boxed_slice(),
+            system_conditions: Vec::with_capacity(sys_count).into_boxed_slice(),
+            set_conditions: Vec::with_capacity(set_with_conditions_count).into_boxed_slice(),
+            system_ids: dg_system_ids.into_boxed_slice(),
+            set_ids: hg_set_ids.into_boxed_slice(),
+            system_dependencies: system_dependencies.into_boxed_slice(),
+            system_dependents: system_dependents.into_boxed_slice(),
+            sets_with_conditions_of_systems: sets_with_conditions_of_systems.into_boxed_slice(),
+            systems_in_sets_with_conditions: systems_in_sets_with_conditions.into_boxed_slice(),
         }
     }
 
@@ -1317,28 +1321,27 @@ impl ScheduleGraph {
         }
 
         // move systems out of old schedule
-        for ((key, system), conditions) in schedule
-            .system_ids
-            .drain(..)
-            .zip(schedule.systems.drain(..))
-            .zip(schedule.system_conditions.drain(..))
+        let system_ids = core::mem::take(&mut schedule.system_ids);
+        let systems = core::mem::take(&mut schedule.systems);
+        let system_conditions = core::mem::take(&mut schedule.system_conditions);
+        let set_ids = core::mem::take(&mut schedule.set_ids);
+        let set_conditions = core::mem::take(&mut schedule.set_conditions);
+
+        for ((key, system), conditions) in
+            system_ids.into_iter().zip(systems).zip(system_conditions)
         {
             if let Some(node) = self.systems.node_mut(key) {
                 node.inner = Some(system);
             }
 
             if let Some(node_conditions) = self.systems.get_conditions_mut(key) {
-                *node_conditions = conditions;
+                *node_conditions = conditions.into_vec();
             }
         }
 
-        for (key, conditions) in schedule
-            .set_ids
-            .drain(..)
-            .zip(schedule.set_conditions.drain(..))
-        {
+        for (key, conditions) in set_ids.into_iter().zip(set_conditions) {
             if let Some(node_conditions) = self.system_sets.get_conditions_mut(key) {
-                *node_conditions = conditions;
+                *node_conditions = conditions.into_vec();
             }
         }
 
@@ -1354,17 +1357,25 @@ impl ScheduleGraph {
         }
 
         // move systems into new schedule
+        let mut systems = Vec::new();
+        let mut system_conditions = Vec::new();
+        let mut set_conditions = Vec::new();
+
         for &key in &schedule.system_ids {
             let system = self.systems.node_mut(key).unwrap().inner.take().unwrap();
             let conditions = core::mem::take(self.systems.get_conditions_mut(key).unwrap());
-            schedule.systems.push(system);
-            schedule.system_conditions.push(conditions);
+            systems.push(system);
+            system_conditions.push(conditions.into_boxed_slice());
         }
 
         for &key in &schedule.set_ids {
             let conditions = core::mem::take(self.system_sets.get_conditions_mut(key).unwrap());
-            schedule.set_conditions.push(conditions);
+            set_conditions.push(conditions.into_boxed_slice());
         }
+
+        schedule.systems = systems.into_boxed_slice();
+        schedule.system_conditions = system_conditions.into_boxed_slice();
+        schedule.set_conditions = set_conditions.into_boxed_slice();
 
         Ok(warnings)
     }

@@ -3,7 +3,7 @@ use crate::{
     schedule::{InternedScheduleLabel, NodeId, Schedule, ScheduleLabel, SystemKey},
     system::{IntoSystem, ResMut},
 };
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use bevy_platform::collections::HashMap;
 use bevy_utils::TypeIdMap;
 use core::any::TypeId;
@@ -604,7 +604,7 @@ struct ScheduleState {
     /// This is a cached copy of `SystemExecutable::system_ids`. We need it
     /// available here to be accessed by [`Stepping::cursor()`] so we can return
     /// [`NodeId`]s to the caller.
-    node_ids: Vec<SystemKey>,
+    node_ids: Box<[SystemKey]>,
 
     /// changes to system behavior that should be applied the next time
     /// [`ScheduleState::skipped_systems()`] is called

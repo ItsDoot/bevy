@@ -1158,9 +1158,13 @@ mod tests {
                         item.0,
                         item.1,
                         item.2
-                            .into_iter()
-                            .map(|name| name.to_string())
-                            .collect::<Vec<_>>(),
+                            .map(|names| {
+                                names
+                                    .into_iter()
+                                    .map(|name| name.to_string())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default(),
                     )
                 })
                 .collect();
@@ -1217,9 +1221,13 @@ mod tests {
                         item.0,
                         item.1,
                         item.2
-                            .into_iter()
-                            .map(|name| name.to_string())
-                            .collect::<Vec<_>>(),
+                            .map(|names| {
+                                names
+                                    .into_iter()
+                                    .map(|name| name.to_string())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default(),
                     )
                 })
                 .collect();

@@ -36,8 +36,8 @@ struct Environment<'env, 'sys> {
 }
 
 struct Conditions<'a> {
-    system_conditions: &'a mut [Vec<ConditionWithAccess>],
-    set_conditions: &'a mut [Vec<ConditionWithAccess>],
+    system_conditions: &'a mut [Box<[ConditionWithAccess]>],
+    set_conditions: &'a mut [Box<[ConditionWithAccess]>],
     sets_with_conditions_of_systems: &'a [FixedBitSet],
     systems_in_sets_with_conditions: &'a [FixedBitSet],
 }
@@ -50,7 +50,7 @@ impl<'env, 'sys> Environment<'env, 'sys> {
     ) -> Self {
         Environment {
             executor,
-            systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut_slice()).as_slice_of_cells(),
+            systems: SyncUnsafeCell::from_mut(schedule.systems.as_mut()).as_slice_of_cells(),
             conditions: SyncUnsafeCell::new(Conditions {
                 system_conditions: &mut schedule.system_conditions,
                 set_conditions: &mut schedule.set_conditions,
@@ -73,7 +73,7 @@ struct SystemTaskMetadata {
     /// and needs access to run its conditions but not for itself.
     condition_conflicting_systems: FixedBitSet,
     /// Indices of the systems that directly depend on the system.
-    dependents: Vec<usize>,
+    dependents: Box<[usize]>,
     /// Is `true` if the system does not access `!Send` data.
     is_send: bool,
     /// Is `true` if the system is exclusive.
@@ -114,7 +114,7 @@ pub struct ExecutorState {
     /// The number of systems that are running.
     num_running_systems: usize,
     /// The number of dependencies each system has that have not completed.
-    num_dependencies_remaining: Vec<usize>,
+    num_dependencies_remaining: Box<[usize]>,
     /// System sets whose conditions have been evaluated.
     evaluated_sets: FixedBitSet,
     /// Systems that have no remaining dependencies and are waiting to run.
@@ -232,7 +232,7 @@ impl SystemExecutor for MultiThreadedExecutor {
             }
         }
 
-        state.num_dependencies_remaining = Vec::with_capacity(sys_count);
+        state.num_dependencies_remaining = core::iter::repeat_n(0, sys_count).collect();
     }
 
     fn run(
@@ -408,7 +408,7 @@ impl ExecutorState {
             system_task_metadata: Vec::new(),
             set_condition_conflicting_systems: Vec::new(),
             num_running_systems: 0,
-            num_dependencies_remaining: Vec::new(),
+            num_dependencies_remaining: Box::new([]),
             local_thread_running: false,
             exclusive_running: false,
             evaluated_sets: FixedBitSet::new(),

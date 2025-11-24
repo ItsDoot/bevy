@@ -381,7 +381,7 @@ pub struct Bundles {
     contributed_bundle_ids: TypeIdMap<BundleId>,
     /// Cache dynamic [`BundleId`] with multiple components
     dynamic_bundle_ids: HashMap<Box<[ComponentId]>, BundleId>,
-    dynamic_bundle_storages: HashMap<BundleId, Vec<StorageType>>,
+    dynamic_bundle_storages: HashMap<BundleId, Box<[StorageType]>>,
     /// Cache optimized dynamic [`BundleId`] with single component
     dynamic_component_bundle_ids: HashMap<ComponentId, BundleId>,
     dynamic_component_storages: HashMap<BundleId, StorageType>,
@@ -507,7 +507,10 @@ impl Bundles {
     /// # Safety
     /// This [`BundleId`] must have been initialized with multiple [`Component`](crate::component::Component)s
     /// (via [`init_dynamic_info`](Self::init_dynamic_info))
-    pub(crate) unsafe fn get_storages_unchecked(&mut self, id: BundleId) -> &mut Vec<StorageType> {
+    pub(crate) unsafe fn get_storages_unchecked(
+        &mut self,
+        id: BundleId,
+    ) -> &mut Box<[StorageType]> {
         self.dynamic_bundle_storages
             .get_mut(&id)
             .debug_checked_unwrap()
@@ -585,7 +588,7 @@ fn initialize_dynamic_bundle(
     storages: &mut Storages,
     components: &Components,
     component_ids: Vec<ComponentId>,
-) -> (BundleId, Vec<StorageType>) {
+) -> (BundleId, Box<[StorageType]>) {
     // Assert component existence
     let storage_types = component_ids.iter().map(|&id| {
         components.get_info(id).unwrap_or_else(|| {

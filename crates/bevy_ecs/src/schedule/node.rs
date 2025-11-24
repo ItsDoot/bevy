@@ -601,7 +601,7 @@ impl Systems {
     /// Calculates the list of systems that conflict with each other based on
     /// their access patterns.
     ///
-    /// If the `Box<[ComponentId]>` is empty for a given pair of systems, then the
+    /// If the component list is `None` for a given pair of systems, then the
     /// systems conflict on [`World`] access in general (e.g. one of them is
     /// exclusive, or both systems have `Query<EntityMut>`).
     pub fn get_conflicting_systems(
@@ -611,7 +611,7 @@ impl Systems {
         ambiguous_with_all: &HashSet<NodeId>,
         ignored_ambiguities: &BTreeSet<ComponentId>,
     ) -> ConflictingSystems {
-        let mut conflicting_systems: Vec<(_, _, Box<[_]>)> = Vec::new();
+        let mut conflicting_systems: Vec<(_, _, Option<Box<[_]>>)> = Vec::new();
         for &(a, b) in flat_dependency_analysis.disconnected() {
             if flat_ambiguous_with.contains_edge(a, b)
                 || ambiguous_with_all.contains(&NodeId::System(a))
@@ -623,7 +623,7 @@ impl Systems {
             let system_a = &self[a];
             let system_b = &self[b];
             if system_a.is_exclusive() || system_b.is_exclusive() {
-                conflicting_systems.push((a, b, Box::new([])));
+                conflicting_systems.push((a, b, None));
             } else {
                 let access_a = &system_a.access;
                 let access_b = &system_b.access;
@@ -636,20 +636,20 @@ impl Systems {
                                 .filter(|id| !ignored_ambiguities.contains(id))
                                 .collect();
                             if !conflicts.is_empty() {
-                                conflicting_systems.push((a, b, conflicts));
+                                conflicting_systems.push((a, b, Some(conflicts)));
                             }
                         }
                         AccessConflicts::All => {
                             // there is no specific component conflicting, but the systems are overall incompatible
                             // for example 2 systems with `Query<EntityMut>`
-                            conflicting_systems.push((a, b, Box::new([])));
+                            conflicting_systems.push((a, b, None));
                         }
                     }
                 }
             }
         }
 
-        ConflictingSystems(conflicting_systems)
+        ConflictingSystems(conflicting_systems.into_boxed_slice())
     }
 }
 
@@ -673,10 +673,10 @@ impl IndexMut<SystemKey> for Systems {
 
 /// Pairs of systems that conflict with each other along with the components
 /// they conflict on, which prevents them from running in parallel. If the
-/// component list is empty, the systems conflict on [`World`] access in general
+/// component list is `None`, the systems conflict on [`World`] access in general
 /// (e.g. one of them is exclusive, or both systems have `Query<EntityMut>`).
 #[derive(Clone, Debug, Default)]
-pub struct ConflictingSystems(pub Vec<(SystemKey, SystemKey, Box<[ComponentId]>)>);
+pub struct ConflictingSystems(pub Box<[(SystemKey, SystemKey, Option<Box<[ComponentId]>>)]>);
 
 impl ConflictingSystems {
     /// Checks if there are any conflicting systems, returning [`Ok`] if there
@@ -695,15 +695,16 @@ impl ConflictingSystems {
         &self,
         graph: &ScheduleGraph,
         components: &Components,
-    ) -> impl Iterator<Item = (String, String, Box<[DebugName]>)> {
+    ) -> impl Iterator<Item = (String, String, Option<Box<[DebugName]>>)> {
         self.iter().map(move |(system_a, system_b, conflicts)| {
             let name_a = graph.get_node_name(&NodeId::System(*system_a));
             let name_b = graph.get_node_name(&NodeId::System(*system_b));
 
-            let conflict_names: Box<[_]> = conflicts
-                .iter()
-                .map(|id| components.get_name(*id).unwrap())
-                .collect();
+            let conflict_names: Option<Box<[_]>> = conflicts.as_deref().map(|ids| {
+                ids.iter()
+                    .map(|id| components.get_name(*id).unwrap())
+                    .collect()
+            });
 
             (name_a, name_b, conflict_names)
         })
@@ -711,7 +712,7 @@ impl ConflictingSystems {
 }
 
 impl Deref for ConflictingSystems {
-    type Target = Vec<(SystemKey, SystemKey, Box<[ComponentId]>)>;
+    type Target = [(SystemKey, SystemKey, Option<Box<[ComponentId]>>)];
 
     fn deref(&self) -> &Self::Target {
         &self.0

@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     fmt::{self, Debug},
     hash::{BuildHasher, Hash},
@@ -255,9 +255,9 @@ pub struct DagAnalysis<N: GraphNodeId, S: BuildHasher = FixedHasher> {
     /// Pairs of nodes that have a path connecting them.
     connected: HashSet<(N, N), S>,
     /// Pairs of nodes that don't have a path connecting them.
-    disconnected: Vec<(N, N)>,
+    disconnected: Box<[(N, N)]>,
     /// Edges that are redundant because a longer path exists.
-    transitive_edges: Vec<(N, N)>,
+    transitive_edges: Box<[(N, N)]>,
     /// Variant of the graph with no transitive edges.
     transitive_reduction: DiGraph<N, S>,
     /// Variant of the graph with all possible transitive edges.
@@ -369,8 +369,8 @@ impl<N: GraphNodeId, S: BuildHasher> DagAnalysis<N, S> {
         DagAnalysis {
             reachable,
             connected,
-            disconnected,
-            transitive_edges,
+            disconnected: disconnected.into_boxed_slice(),
+            transitive_edges: transitive_edges.into_boxed_slice(),
             transitive_reduction,
             transitive_closure,
         }
@@ -693,7 +693,7 @@ impl<K: Debug, V: Debug, S> Debug for DagGroups<K, V, S> {
 /// Error indicating that the graph has redundant edges.
 #[derive(Error, Debug)]
 #[error("DAG has redundant edges: {0:?}")]
-pub struct DagRedundancyError<N: GraphNodeId>(pub Vec<(N, N)>);
+pub struct DagRedundancyError<N: GraphNodeId>(pub Box<[(N, N)]>);
 
 /// Error indicating that two graphs both have a dependency between the same nodes.
 #[derive(Error, Debug)]

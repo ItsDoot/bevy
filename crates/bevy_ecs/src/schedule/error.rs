@@ -248,7 +248,7 @@ impl ScheduleBuildError {
         for (name_a, name_b, conflicts) in ambiguities {
             writeln!(message, " -- {name_a} and {name_b}").unwrap();
 
-            if !conflicts.is_empty() {
+            if let Some(conflicts) = conflicts {
                 writeln!(message, "    conflict on: {conflicts:?}").unwrap();
             } else {
                 // one or both systems must be exclusive

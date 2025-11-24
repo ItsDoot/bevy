@@ -13,9 +13,10 @@ pull_requests: [21608, 21817]
 - `ScheduleBuildError::CrossDependency` now wraps a `DagCrossDependencyError<NodeId>` instead of directly holding two `NodeId`s. Fetch them from the wrapped struct instead.
 - `ScheduleBuildError::SetsHaveOrderButIntersect` now wraps a `DagOverlappingGroupError<SystemSetKey>` instead of directly holding two `SystemSetKey`s. Fetch them from the wrapped struct instead.
 - `ScheduleBuildError::SystemTypeSetAmbiguity` now wraps a `SystemTypeSetAmbiguityError` instead of directly holding a `SystemSetKey`. Fetch them from the wrapped struct instead.
-- `ScheduleBuildWarning::HierarchyRedundancy` now wraps a `DagRedundancyError<NodeId>` instead of directly holding a `Vec<(NodeId, NodeId)>`. Fetch them from the wrapped struct instead.
+- `ScheduleBuildWarning::HierarchyRedundancy` now wraps a `DagRedundancyError<NodeId>` which contains a `Box<[(NodeId, NodeId)]>` instead of directly holding a `Vec<(NodeId, NodeId)>`. Fetch them from the wrapped struct instead.
 - `ScheduleBuildWarning::Ambiguity` now wraps a `AmbiguousSystemConflictsWarning` instead of directly holding a `Vec`. Fetch them from the wrapped struct instead.
 - `ScheduleGraph::conflicting_systems` now returns a `&ConflictingSystems` instead of a slice. Fetch conflicts from the wrapped struct instead.
+- `ScheduleGraph::conflicting_systems` now signals whole-system conflicts with a `None` component list, rather than an empty component list.
 - `ScheduleGraph::systems_in_set` now returns a `&HashSet<SystemKey>` instead of a slice, to reduce redundant allocations.
 - `ScheduleGraph::conflicts_to_string` functionality has been replaced with `ConflictingSystems::to_string`.
 - `ScheduleBuildPass::build` now takes `&mut Dag<SystemKey>` instead of `&mut DiGraph<SystemKey>`, to allow reusing previous toposorts.
