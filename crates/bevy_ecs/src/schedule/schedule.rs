@@ -688,7 +688,7 @@ impl Schedule {
 #[derive(Default)]
 pub struct ScheduleGraph {
     /// Container of systems in the schedule.
-    pub systems: Systems,
+    pub systems: Systems<dyn System<In = (), Out = ()>>,
     /// Container of system sets in the schedule.
     pub system_sets: SystemSets,
     /// Directed acyclic graph of the hierarchy (which systems/sets are children of which sets)

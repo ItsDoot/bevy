@@ -76,7 +76,7 @@ pub struct SystemSchedule {
     /// List of system node ids.
     pub(super) system_ids: Vec<SystemKey>,
     /// Indexed by system node id.
-    pub(super) systems: Vec<SystemWithAccess>,
+    pub(super) systems: Vec<SystemWithAccess<dyn System<In = (), Out = ()>>>,
     /// Indexed by system node id.
     pub(super) system_conditions: Vec<Vec<ConditionWithAccess>>,
     /// Indexed by system node id.

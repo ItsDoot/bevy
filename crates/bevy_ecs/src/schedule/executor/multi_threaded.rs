@@ -19,7 +19,7 @@ use crate::{
         is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
         SystemWithAccess,
     },
-    system::{RunSystemError, ScheduleSystem},
+    system::{RunSystemError, ScheduleSystem, System},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 #[cfg(feature = "hotpatching")]
@@ -30,7 +30,7 @@ use super::__rust_begin_short_backtrace;
 /// Borrowed data used by the [`MultiThreadedExecutor`].
 struct Environment<'env, 'sys> {
     executor: &'env MultiThreadedExecutor,
-    systems: &'sys [SyncUnsafeCell<SystemWithAccess>],
+    systems: &'sys [SyncUnsafeCell<SystemWithAccess<dyn System<In = (), Out = ()>>>],
     conditions: SyncUnsafeCell<Conditions<'sys>>,
     world_cell: UnsafeWorldCell<'env>,
 }
@@ -808,7 +808,7 @@ impl ExecutorState {
 
 fn apply_deferred(
     unapplied_systems: &FixedBitSet,
-    systems: &[SyncUnsafeCell<SystemWithAccess>],
+    systems: &[SyncUnsafeCell<SystemWithAccess<dyn System<In = (), Out = ()>>>],
     world: &mut World,
 ) -> Result<(), Box<dyn Any + Send>> {
     for system_index in unapplied_systems.ones() {

@@ -25,30 +25,29 @@ use crate::{
     },
     storage::SparseSetIndex,
     system::{
-        ReadOnlySystem, RunSystemError, ScheduleSystem, System, SystemParamValidationError,
-        SystemStateFlags,
+        ReadOnlySystem, RunSystemError, System, SystemParamValidationError, SystemStateFlags,
     },
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
 /// A [`SystemWithAccess`] stored in a [`ScheduleGraph`].
-pub(crate) struct SystemNode {
-    pub(crate) inner: Option<SystemWithAccess>,
+pub(crate) struct SystemNode<S: ?Sized + System> {
+    pub(crate) inner: Option<SystemWithAccess<S>>,
 }
 
 /// A [`ScheduleSystem`] stored alongside the access returned from [`System::initialize`].
-pub struct SystemWithAccess {
+pub struct SystemWithAccess<S: ?Sized + System> {
     /// The system itself.
-    pub system: ScheduleSystem,
+    pub system: Box<S>,
     /// The access returned by [`System::initialize`].
     /// This will be empty if the system has not been initialized yet.
     pub access: FilteredAccessSet,
 }
 
-impl SystemWithAccess {
-    /// Constructs a new [`SystemWithAccess`] from a [`ScheduleSystem`].
+impl<S: ?Sized + System> SystemWithAccess<S> {
+    /// Constructs a new [`SystemWithAccess`] from a system `S`.
     /// The `access` will initially be empty.
-    pub fn new(system: ScheduleSystem) -> Self {
+    pub fn new(system: Box<S>) -> Self {
         Self {
             system,
             access: FilteredAccessSet::new(),
@@ -56,9 +55,9 @@ impl SystemWithAccess {
     }
 }
 
-impl System for SystemWithAccess {
-    type In = ();
-    type Out = ();
+impl<S: ?Sized + System> System for SystemWithAccess<S> {
+    type In = S::In;
+    type Out = S::Out;
 
     #[inline]
     fn name(&self) -> DebugName {
@@ -236,21 +235,21 @@ impl System for ConditionWithAccess {
     }
 }
 
-impl SystemNode {
+impl<S: ?Sized + System> SystemNode<S> {
     /// Create a new [`SystemNode`]
-    pub fn new(system: ScheduleSystem) -> Self {
+    pub fn new(system: Box<S>) -> Self {
         Self {
             inner: Some(SystemWithAccess::new(system)),
         }
     }
 
     /// Obtain a reference to the [`SystemWithAccess`] represented by this node.
-    pub fn get(&self) -> Option<&SystemWithAccess> {
+    pub fn get(&self) -> Option<&SystemWithAccess<S>> {
         self.inner.as_ref()
     }
 
     /// Obtain a mutable reference to the [`SystemWithAccess`] represented by this node.
-    pub fn get_mut(&mut self) -> Option<&mut SystemWithAccess> {
+    pub fn get_mut(&mut self) -> Option<&mut SystemWithAccess<S>> {
         self.inner.as_mut()
     }
 }
@@ -463,17 +462,16 @@ impl From<CompactNodeIdPair> for (NodeId, NodeId) {
 }
 
 /// Container for systems in a schedule.
-#[derive(Default)]
-pub struct Systems {
+pub struct Systems<S: ?Sized + System> {
     /// List of systems in the schedule.
-    nodes: SlotMap<SystemKey, SystemNode>,
+    nodes: SlotMap<SystemKey, SystemNode<S>>,
     /// List of conditions for each system, in the same order as `nodes`.
     conditions: SecondaryMap<SystemKey, Vec<ConditionWithAccess>>,
     /// Systems and their conditions that have not been initialized yet.
     uninit: Vec<SystemKey>,
 }
 
-impl Systems {
+impl<S: ?Sized + System> Systems<S> {
     /// Returns the number of systems in this container.
     pub fn len(&self) -> usize {
         self.nodes.len()
@@ -485,18 +483,18 @@ impl Systems {
     }
 
     /// Returns a reference to the system with the given key, if it exists.
-    pub fn get(&self, key: SystemKey) -> Option<&SystemWithAccess> {
+    pub fn get(&self, key: SystemKey) -> Option<&SystemWithAccess<S>> {
         self.nodes.get(key).and_then(|node| node.get())
     }
 
     /// Returns a mutable reference to the system with the given key, if it exists.
-    pub fn get_mut(&mut self, key: SystemKey) -> Option<&mut SystemWithAccess> {
+    pub fn get_mut(&mut self, key: SystemKey) -> Option<&mut SystemWithAccess<S>> {
         self.nodes.get_mut(key).and_then(|node| node.get_mut())
     }
 
     /// Returns a mutable reference to the system with the given key. Will return
     /// `None` if the key does not exist.
-    pub(crate) fn node_mut(&mut self, key: SystemKey) -> Option<&mut SystemNode> {
+    pub(crate) fn node_mut(&mut self, key: SystemKey) -> Option<&mut SystemNode<S>> {
         self.nodes.get_mut(key)
     }
 
@@ -519,9 +517,7 @@ impl Systems {
 
     /// Returns an iterator over all systems and their conditions in this
     /// container.
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (SystemKey, &ScheduleSystem, &[ConditionWithAccess])> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (SystemKey, &Box<S>, &[ConditionWithAccess])> + '_ {
         self.nodes.iter().filter_map(|(key, node)| {
             let system = &node.get()?.system;
             let conditions = self
@@ -542,7 +538,7 @@ impl Systems {
     /// run of the schedule.
     pub fn insert(
         &mut self,
-        system: ScheduleSystem,
+        system: Box<S>,
         conditions: Vec<Box<dyn ReadOnlySystem<In = (), Out = bool>>>,
     ) -> SystemKey {
         let key = self.nodes.insert(SystemNode::new(system));
@@ -653,8 +649,18 @@ impl Systems {
     }
 }
 
-impl Index<SystemKey> for Systems {
-    type Output = SystemWithAccess;
+impl<S: ?Sized + System> Default for Systems<S> {
+    fn default() -> Self {
+        Self {
+            nodes: Default::default(),
+            conditions: Default::default(),
+            uninit: Default::default(),
+        }
+    }
+}
+
+impl<S: ?Sized + System> Index<SystemKey> for Systems<S> {
+    type Output = SystemWithAccess<S>;
 
     #[track_caller]
     fn index(&self, key: SystemKey) -> &Self::Output {
@@ -663,7 +669,7 @@ impl Index<SystemKey> for Systems {
     }
 }
 
-impl IndexMut<SystemKey> for Systems {
+impl<S: ?Sized + System> IndexMut<SystemKey> for Systems<S> {
     #[track_caller]
     fn index_mut(&mut self, key: SystemKey) -> &mut Self::Output {
         self.get_mut(key)
