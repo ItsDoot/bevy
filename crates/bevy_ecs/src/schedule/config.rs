@@ -7,7 +7,7 @@ use crate::{
         condition::{BoxedCondition, SystemCondition},
         graph::{Ambiguity, Dependency, DependencyKind, GraphInfo},
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
-        Chain,
+        Chain, NodeId, ScheduleGraph,
     },
     system::{BoxedSystem, IntoSystem, ScheduleSystem, System},
 };
@@ -35,8 +35,8 @@ fn ambiguous_with(graph_info: &mut GraphInfo, set: InternedSystemSet) {
     }
 }
 
-/// Stores data to differentiate different schedulable structs.
-pub trait Schedulable {
+/// Data that can be added to a [`ScheduleGraph`] as a node.
+pub trait Schedulable: Sized {
     /// Additional data used to configure independent scheduling. Stored in [`ScheduleConfig`].
     type Metadata;
     /// Additional data used to configure a schedulable group. Stored in [`ScheduleConfigs`].
@@ -46,6 +46,9 @@ pub trait Schedulable {
     fn into_config(self) -> ScheduleConfig<Self>
     where
         Self: Sized;
+
+    /// Process a single [`ScheduleConfig`].
+    fn process_config(graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId;
 }
 
 impl Schedulable for ScheduleSystem {
@@ -62,6 +65,10 @@ impl Schedulable for ScheduleSystem {
             },
             conditions: Vec::new(),
         }
+    }
+
+    fn process_config(graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId {
+        NodeId::System(graph.add_system_inner(config))
     }
 }
 
@@ -80,6 +87,10 @@ impl Schedulable for InternedSystemSet {
             metadata: GraphInfo::default(),
             conditions: Vec::new(),
         }
+    }
+
+    fn process_config(graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId {
+        NodeId::Set(graph.configure_set_inner(config))
     }
 }
 
