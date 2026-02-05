@@ -13,6 +13,7 @@ use crate::{
         AmbiguousSystemConflictsWarning, ConflictingSystems, NodeId, ScheduleGraph, SystemKey,
         SystemSetKey, SystemTypeSetAmbiguityError,
     },
+    system::System,
     world::World,
 };
 
@@ -85,7 +86,7 @@ impl ScheduleBuildError {
     ///
     /// [`initialize`]: crate::schedule::Schedule::initialize
     /// [`Schedule`]: crate::schedule::Schedule
-    pub fn to_string(&self, graph: &ScheduleGraph, world: &World) -> String {
+    pub fn to_string<S: System + ?Sized>(&self, graph: &ScheduleGraph<S>, world: &World) -> String {
         match self {
             ScheduleBuildError::HierarchySort(DiGraphToposortError::Loop(node_id)) => {
                 Self::hierarchy_loop_to_string(node_id, graph)
@@ -119,7 +120,10 @@ impl ScheduleBuildError {
         }
     }
 
-    fn hierarchy_loop_to_string(node_id: &NodeId, graph: &ScheduleGraph) -> String {
+    fn hierarchy_loop_to_string<S: System + ?Sized>(
+        node_id: &NodeId,
+        graph: &ScheduleGraph<S>,
+    ) -> String {
         format!(
             "{} `{}` contains itself",
             node_id.kind(),
@@ -127,7 +131,10 @@ impl ScheduleBuildError {
         )
     }
 
-    fn hierarchy_cycle_to_string(cycles: &[Vec<NodeId>], graph: &ScheduleGraph) -> String {
+    fn hierarchy_cycle_to_string<S: System + ?Sized>(
+        cycles: &[Vec<NodeId>],
+        graph: &ScheduleGraph<S>,
+    ) -> String {
         let mut message = format!("schedule has {} in_set cycle(s):\n", cycles.len());
         for (i, cycle) in cycles.iter().enumerate() {
             let mut names = cycle.iter().map(|id| (id.kind(), graph.get_node_name(id)));
@@ -147,9 +154,9 @@ impl ScheduleBuildError {
         message
     }
 
-    fn hierarchy_redundancy_to_string(
+    fn hierarchy_redundancy_to_string<S: System + ?Sized>(
         transitive_edges: &[(NodeId, NodeId)],
-        graph: &ScheduleGraph,
+        graph: &ScheduleGraph<S>,
     ) -> String {
         let mut message = String::from("hierarchy contains redundant edge(s)");
         for (parent, child) in transitive_edges {
@@ -166,7 +173,10 @@ impl ScheduleBuildError {
         message
     }
 
-    fn dependency_loop_to_string(node_id: &NodeId, graph: &ScheduleGraph) -> String {
+    fn dependency_loop_to_string<S: System + ?Sized>(
+        node_id: &NodeId,
+        graph: &ScheduleGraph<S>,
+    ) -> String {
         format!(
             "{} `{}` has been told to run before itself",
             node_id.kind(),
@@ -174,9 +184,9 @@ impl ScheduleBuildError {
         )
     }
 
-    fn dependency_cycle_to_string<N: GraphNodeId + Into<NodeId>>(
+    fn dependency_cycle_to_string<N: GraphNodeId + Into<NodeId>, S: System + ?Sized>(
         cycles: &[Vec<N>],
-        graph: &ScheduleGraph,
+        graph: &ScheduleGraph<S>,
     ) -> String {
         let mut message = format!("schedule has {} before/after cycle(s):\n", cycles.len());
         for (i, cycle) in cycles.iter().enumerate() {
@@ -199,9 +209,9 @@ impl ScheduleBuildError {
         message
     }
 
-    fn cross_dependency_to_string(
+    fn cross_dependency_to_string<S: System + ?Sized>(
         error: &DagCrossDependencyError<NodeId>,
-        graph: &ScheduleGraph,
+        graph: &ScheduleGraph<S>,
     ) -> String {
         let DagCrossDependencyError(a, b) = error;
         format!(
@@ -214,10 +224,10 @@ impl ScheduleBuildError {
         )
     }
 
-    fn sets_have_order_but_intersect_to_string(
+    fn sets_have_order_but_intersect_to_string<S: System + ?Sized>(
         a: &SystemSetKey,
         b: &SystemSetKey,
-        graph: &ScheduleGraph,
+        graph: &ScheduleGraph<S>,
     ) -> String {
         format!(
             "`{}` and `{}` have a `before`-`after` relationship (which may be transitive) but share systems.",
@@ -226,7 +236,10 @@ impl ScheduleBuildError {
         )
     }
 
-    fn system_type_set_ambiguity_to_string(set: &SystemSetKey, graph: &ScheduleGraph) -> String {
+    fn system_type_set_ambiguity_to_string<S: System + ?Sized>(
+        set: &SystemSetKey,
+        graph: &ScheduleGraph<S>,
+    ) -> String {
         let name = graph.get_node_name(&NodeId::Set(*set));
         format!(
             "Tried to order against `{name}` in a schedule that has more than one `{name}` instance. `{name}` is a \
@@ -234,9 +247,9 @@ impl ScheduleBuildError {
         )
     }
 
-    pub(crate) fn ambiguity_to_string(
+    pub(crate) fn ambiguity_to_string<S: System + ?Sized>(
         ambiguities: &ConflictingSystems,
-        graph: &ScheduleGraph,
+        graph: &ScheduleGraph<S>,
         components: &Components,
     ) -> String {
         let n_ambiguities = ambiguities.len();
@@ -267,7 +280,7 @@ impl ScheduleBuildError {
 impl ScheduleBuildWarning {
     /// Renders the warning as a human-readable string with node identifiers
     /// replaced with their names.
-    pub fn to_string(&self, graph: &ScheduleGraph, world: &World) -> String {
+    pub fn to_string<S: System + ?Sized>(&self, graph: &ScheduleGraph<S>, world: &World) -> String {
         match self {
             ScheduleBuildWarning::HierarchyRedundancy(DagRedundancyError(transitive_edges)) => {
                 ScheduleBuildError::hierarchy_redundancy_to_string(transitive_edges, graph)

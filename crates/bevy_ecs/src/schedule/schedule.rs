@@ -33,7 +33,6 @@ use crate::{
     prelude::Component,
     resource::Resource,
     schedule::*,
-    system::ScheduleSystem,
     world::World,
 };
 
@@ -41,14 +40,14 @@ pub use stepping::Stepping;
 use Direction::{Incoming, Outgoing};
 
 /// Resource that stores [`Schedule`]s mapped to [`ScheduleLabel`]s excluding the current running [`Schedule`].
-#[derive(Default, Resource)]
-pub struct Schedules {
-    inner: HashMap<InternedScheduleLabel, Schedule>,
+#[derive(Resource)]
+pub struct Schedules<S: System<In = (), Out = ()> + ?Sized = dyn System<In = (), Out = ()>> {
+    inner: HashMap<InternedScheduleLabel, Schedule<S>>,
     /// List of [`ComponentId`]s to ignore when reporting system order ambiguity conflicts
     pub ignored_scheduling_ambiguities: BTreeSet<ComponentId>,
 }
 
-impl Schedules {
+impl<S: System<In = (), Out = ()> + ?Sized> Schedules<S> {
     /// Constructs an empty `Schedules` with zero initial capacity.
     pub fn new() -> Self {
         Self::default()
@@ -58,12 +57,12 @@ impl Schedules {
     ///
     /// If the map already had an entry for `label`, `schedule` is inserted,
     /// and the old schedule is returned. Otherwise, `None` is returned.
-    pub fn insert(&mut self, schedule: Schedule) -> Option<Schedule> {
+    pub fn insert(&mut self, schedule: Schedule<S>) -> Option<Schedule<S>> {
         self.inner.insert(schedule.label, schedule)
     }
 
     /// Removes the schedule corresponding to the `label` from the map, returning it if it existed.
-    pub fn remove(&mut self, label: impl ScheduleLabel) -> Option<Schedule> {
+    pub fn remove(&mut self, label: impl ScheduleLabel) -> Option<Schedule<S>> {
         self.inner.remove(&label.intern())
     }
 
@@ -71,7 +70,7 @@ impl Schedules {
     pub fn remove_entry(
         &mut self,
         label: impl ScheduleLabel,
-    ) -> Option<(InternedScheduleLabel, Schedule)> {
+    ) -> Option<(InternedScheduleLabel, Schedule<S>)> {
         self.inner.remove_entry(&label.intern())
     }
 
@@ -81,30 +80,30 @@ impl Schedules {
     }
 
     /// Returns a reference to the schedule associated with `label`, if it exists.
-    pub fn get(&self, label: impl ScheduleLabel) -> Option<&Schedule> {
+    pub fn get(&self, label: impl ScheduleLabel) -> Option<&Schedule<S>> {
         self.inner.get(&label.intern())
     }
 
     /// Returns a mutable reference to the schedule associated with `label`, if it exists.
-    pub fn get_mut(&mut self, label: impl ScheduleLabel) -> Option<&mut Schedule> {
+    pub fn get_mut(&mut self, label: impl ScheduleLabel) -> Option<&mut Schedule<S>> {
         self.inner.get_mut(&label.intern())
     }
 
     /// Returns a mutable reference to the schedules associated with `label`, creating one if it doesn't already exist.
-    pub fn entry(&mut self, label: impl ScheduleLabel) -> &mut Schedule {
+    pub fn entry(&mut self, label: impl ScheduleLabel) -> &mut Schedule<S> {
         self.inner
             .entry(label.intern())
             .or_insert_with(|| Schedule::new(label))
     }
 
     /// Returns an iterator over all schedules. Iteration order is undefined.
-    pub fn iter(&self) -> impl Iterator<Item = (&dyn ScheduleLabel, &Schedule)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&dyn ScheduleLabel, &Schedule<S>)> {
         self.inner
             .iter()
             .map(|(label, schedule)| (&**label, schedule))
     }
     /// Returns an iterator over mutable references to all schedules. Iteration order is undefined.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&dyn ScheduleLabel, &mut Schedule)> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&dyn ScheduleLabel, &mut Schedule<S>)> {
         self.inner
             .iter_mut()
             .map(|(label, schedule)| (&**label, schedule))
@@ -178,7 +177,7 @@ impl Schedules {
     pub fn add_systems<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+        systems: impl IntoScheduleConfigs<Box<dyn System<In = (), Out = ()>>, S, M>,
     ) -> &mut Self {
         self.entry(schedule).add_systems(systems);
 
@@ -205,7 +204,7 @@ impl Schedules {
     pub fn configure_sets<M>(
         &mut self,
         schedule: impl ScheduleLabel,
-        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, S, M>,
     ) -> &mut Self {
         self.entry(schedule).configure_sets(sets);
 
@@ -235,7 +234,18 @@ impl Schedules {
     }
 }
 
-fn make_executor(kind: ExecutorKind) -> Box<dyn SystemExecutor> {
+impl<S: System<In = (), Out = ()> + ?Sized> Default for Schedules<S> {
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+            ignored_scheduling_ambiguities: Default::default(),
+        }
+    }
+}
+
+fn make_executor<S: System<In = (), Out = ()> + ?Sized>(
+    kind: ExecutorKind,
+) -> Box<dyn SystemExecutor<S>> {
     match kind {
         ExecutorKind::SingleThreaded => Box::new(SingleThreadedExecutor::new()),
         #[cfg(feature = "std")]
@@ -345,11 +355,11 @@ impl Chain {
 ///     world.run_schedule(Update);
 /// }
 /// ```
-pub struct Schedule {
+pub struct Schedule<S: System<In = (), Out = ()> + ?Sized = dyn System<In = (), Out = ()>> {
     label: InternedScheduleLabel,
-    graph: ScheduleGraph,
-    executable: SystemSchedule,
-    executor: Box<dyn SystemExecutor>,
+    graph: ScheduleGraph<S>,
+    executable: SystemSchedule<S>,
+    executor: Box<dyn SystemExecutor<S>>,
     executor_initialized: bool,
     warnings: Vec<ScheduleBuildWarning>,
 }
@@ -357,17 +367,7 @@ pub struct Schedule {
 #[derive(ScheduleLabel, Hash, PartialEq, Eq, Debug, Clone)]
 struct DefaultSchedule;
 
-impl Default for Schedule {
-    /// Creates a schedule with a default label. Only use in situations where
-    /// you don't care about the [`ScheduleLabel`]. Inserting a default schedule
-    /// into the world risks overwriting another schedule. For most situations
-    /// you should use [`Schedule::new`].
-    fn default() -> Self {
-        Self::new(DefaultSchedule)
-    }
-}
-
-impl Schedule {
+impl<S: System<In = (), Out = ()> + ?Sized> Schedule<S> {
     /// Constructs an empty `Schedule`.
     pub fn new(label: impl ScheduleLabel) -> Self {
         let mut this = Self {
@@ -392,7 +392,7 @@ impl Schedule {
     /// Add a collection of systems to the schedule.
     pub fn add_systems<M>(
         &mut self,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+        systems: impl IntoScheduleConfigs<Box<dyn System<In = (), Out = ()>>, S, M>,
     ) -> &mut Self {
         self.graph.process_configs(systems.into_configs(), false);
         self
@@ -458,14 +458,14 @@ impl Schedule {
     #[track_caller]
     pub fn configure_sets<M>(
         &mut self,
-        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, S, M>,
     ) -> &mut Self {
         self.graph.configure_sets(sets);
         self
     }
 
     /// Add a custom build pass to the schedule.
-    pub fn add_build_pass<T: ScheduleBuildPass>(&mut self, pass: T) -> &mut Self {
+    pub fn add_build_pass<T: ScheduleBuildPass<S>>(&mut self, pass: T) -> &mut Self {
         self.graph.passes.insert(TypeId::of::<T>(), Box::new(pass));
         self
     }
@@ -592,17 +592,17 @@ impl Schedule {
     }
 
     /// Returns the [`ScheduleGraph`].
-    pub fn graph(&self) -> &ScheduleGraph {
+    pub fn graph(&self) -> &ScheduleGraph<S> {
         &self.graph
     }
 
     /// Returns a mutable reference to the [`ScheduleGraph`].
-    pub fn graph_mut(&mut self) -> &mut ScheduleGraph {
+    pub fn graph_mut(&mut self) -> &mut ScheduleGraph<S> {
         &mut self.graph
     }
 
     /// Returns the [`SystemSchedule`].
-    pub(crate) fn executable(&self) -> &SystemSchedule {
+    pub(crate) fn executable(&self) -> &SystemSchedule<S> {
         &self.executable
     }
 
@@ -649,8 +649,7 @@ impl Schedule {
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (SystemKey, &ScheduleSystem)> + Sized, ScheduleNotInitialized>
-    {
+    ) -> Result<impl Iterator<Item = (SystemKey, &Box<S>)> + Sized, ScheduleNotInitialized> {
         if !self.executor_initialized {
             return Err(ScheduleNotInitialized);
         }
@@ -681,14 +680,24 @@ impl Schedule {
     }
 }
 
+impl<S: System<In = (), Out = ()> + ?Sized> Default for Schedule<S> {
+    /// Creates a schedule with a default label. Only use in situations where
+    /// you don't care about the [`ScheduleLabel`]. Inserting a default schedule
+    /// into the world risks overwriting another schedule. For most situations
+    /// you should use [`Schedule::new`].
+    fn default() -> Self {
+        Self::new(DefaultSchedule)
+    }
+}
+
 /// Metadata for a [`Schedule`].
 ///
 /// The order isn't optimized; calling `ScheduleGraph::build_schedule` will return a
 /// `SystemSchedule` where the order is optimized for execution.
 #[derive(Default)]
-pub struct ScheduleGraph {
+pub struct ScheduleGraph<S: System + ?Sized = dyn System<In = (), Out = ()>> {
     /// Container of systems in the schedule.
-    pub systems: Systems<dyn System<In = (), Out = ()>>,
+    pub systems: Systems<S>,
     /// Container of system sets in the schedule.
     pub system_sets: SystemSets,
     /// Directed acyclic graph of the hierarchy (which systems/sets are children of which sets)
@@ -704,10 +713,10 @@ pub struct ScheduleGraph {
     anonymous_sets: usize,
     changed: bool,
     settings: ScheduleBuildSettings,
-    passes: IndexMap<TypeId, Box<dyn ScheduleBuildPassObj>, FixedHasher>,
+    passes: IndexMap<TypeId, Box<dyn ScheduleBuildPassObj<S>>, FixedHasher>,
 }
 
-impl ScheduleGraph {
+impl<S: System + ?Sized> ScheduleGraph<S> {
     /// Creates an empty [`ScheduleGraph`] with default settings.
     pub fn new() -> Self {
         Self {
@@ -750,9 +759,9 @@ impl ScheduleGraph {
         &self.conflicting_systems
     }
 
-    fn process_config<T: Schedulable>(
+    fn process_config<T: Schedulable<S>>(
         &mut self,
-        config: ScheduleConfig<T>,
+        config: ScheduleConfig<T, S>,
         collect_nodes: bool,
     ) -> ProcessConfigsResult {
         ProcessConfigsResult {
@@ -764,9 +773,11 @@ impl ScheduleGraph {
         }
     }
 
-    fn apply_collective_conditions<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>>(
+    fn apply_collective_conditions<
+        T: Schedulable<S, Metadata = GraphInfo, GroupMetadata = Chain>,
+    >(
         &mut self,
-        configs: &mut [ScheduleConfigs<T>],
+        configs: &mut [ScheduleConfigs<T, S>],
         collective_conditions: Vec<BoxedCondition>,
     ) {
         if !collective_conditions.is_empty() {
@@ -795,9 +806,9 @@ impl ScheduleGraph {
     /// - `nodes`: a vector of all node ids contained in the nested `ScheduleConfigs`
     /// - `densely_chained`: a boolean that is true if all nested nodes are linearly chained (with successive `after` orderings) in the order they are defined
     #[track_caller]
-    fn process_configs<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>>(
+    fn process_configs<T: Schedulable<S, Metadata = GraphInfo, GroupMetadata = Chain>>(
         &mut self,
-        configs: ScheduleConfigs<T>,
+        configs: ScheduleConfigs<T, S>,
         collect_nodes: bool,
     ) -> ProcessConfigsResult {
         match configs {
@@ -880,7 +891,7 @@ impl ScheduleGraph {
     }
 
     /// Add a [`ScheduleConfig`] to the graph, including its dependencies and conditions.
-    pub(super) fn add_system_inner(&mut self, config: ScheduleConfig<ScheduleSystem>) -> SystemKey {
+    pub(super) fn add_system_inner(&mut self, config: ScheduleConfig<Box<S>, S>) -> SystemKey {
         let key = self.systems.insert(config.node, config.conditions);
 
         // graph updates are immediate
@@ -890,14 +901,14 @@ impl ScheduleGraph {
     }
 
     #[track_caller]
-    fn configure_sets<M>(&mut self, sets: impl IntoScheduleConfigs<InternedSystemSet, M>) {
+    fn configure_sets<M>(&mut self, sets: impl IntoScheduleConfigs<InternedSystemSet, S, M>) {
         self.process_configs(sets.into_configs(), false);
     }
 
     /// Add a single `ScheduleConfig` to the graph, including its dependencies and conditions.
     pub(super) fn configure_set_inner(
         &mut self,
-        config: ScheduleConfig<InternedSystemSet>,
+        config: ScheduleConfig<InternedSystemSet, S>,
     ) -> SystemSetKey {
         let key = self.system_sets.insert(config.node, config.conditions);
 
@@ -1320,7 +1331,7 @@ impl ScheduleGraph {
     fn update_schedule(
         &mut self,
         world: &mut World,
-        schedule: &mut SystemSchedule,
+        schedule: &mut SystemSchedule<S>,
         ignored_ambiguities: &BTreeSet<ComponentId>,
         schedule_label: InternedScheduleLabel,
     ) -> Result<Vec<ScheduleBuildWarning>, ScheduleBuildError> {
@@ -1418,7 +1429,7 @@ pub enum ScheduleCleanupPolicy {
 }
 
 // methods for reporting errors
-impl ScheduleGraph {
+impl<S: System + ?Sized> ScheduleGraph<S> {
     /// Returns the name of the node with the given [`NodeId`]. Resolves
     /// anonymous sets to a string that describes their contents.
     ///

@@ -28,9 +28,9 @@ use crate::{prelude::DetectChanges, HotPatchChanges};
 use super::__rust_begin_short_backtrace;
 
 /// Borrowed data used by the [`MultiThreadedExecutor`].
-struct Environment<'env, 'sys> {
+struct Environment<'env, 'sys, S: System<In = (), Out = ()> + ?Sized> {
     executor: &'env MultiThreadedExecutor,
-    systems: &'sys [SyncUnsafeCell<SystemWithAccess<dyn System<In = (), Out = ()>>>],
+    systems: &'sys [SyncUnsafeCell<SystemWithAccess<S>>],
     conditions: SyncUnsafeCell<Conditions<'sys>>,
     world_cell: UnsafeWorldCell<'env>,
 }
@@ -42,10 +42,10 @@ struct Conditions<'a> {
     systems_in_sets_with_conditions: &'a [FixedBitSet],
 }
 
-impl<'env, 'sys> Environment<'env, 'sys> {
+impl<'env, 'sys, S: System<In = (), Out = ()> + ?Sized> Environment<'env, 'sys, S> {
     fn new(
         executor: &'env MultiThreadedExecutor,
-        schedule: &'sys mut SystemSchedule,
+        schedule: &'sys mut SystemSchedule<S>,
         world: &'env mut World,
     ) -> Self {
         Environment {
@@ -136,8 +136,8 @@ pub struct ExecutorState {
 // These all need to outlive 'scope in order to be sent to new tasks,
 // and keeping them all in a struct means we can use lifetime elision.
 #[derive(Copy, Clone)]
-struct Context<'scope, 'env, 'sys> {
-    environment: &'env Environment<'env, 'sys>,
+struct Context<'scope, 'env, 'sys, S: System<In = (), Out = ()> + ?Sized> {
+    environment: &'env Environment<'env, 'sys, S>,
     scope: &'scope Scope<'scope, 'env, ()>,
     error_handler: ErrorHandler,
 }
@@ -148,12 +148,12 @@ impl Default for MultiThreadedExecutor {
     }
 }
 
-impl SystemExecutor for MultiThreadedExecutor {
+impl<S: System<In = (), Out = ()> + ?Sized> SystemExecutor<S> for MultiThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::MultiThreaded
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, schedule: &SystemSchedule<S>) {
         let state = self.state.get_mut().unwrap();
         // pre-allocate space
         let sys_count = schedule.system_ids.len();
@@ -237,7 +237,7 @@ impl SystemExecutor for MultiThreadedExecutor {
 
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        schedule: &mut SystemSchedule<S>,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: ErrorHandler,
@@ -325,7 +325,9 @@ impl SystemExecutor for MultiThreadedExecutor {
     }
 }
 
-impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
+impl<'scope, 'env: 'scope, 'sys, S: System<In = (), Out = ()> + ?Sized>
+    Context<'scope, 'env, 'sys, S>
+{
     fn system_completed(
         &self,
         system_index: usize,
@@ -421,7 +423,11 @@ impl ExecutorState {
         }
     }
 
-    fn tick(&mut self, context: &Context, conditions: &mut Conditions) {
+    fn tick<S: System<In = (), Out = ()> + ?Sized>(
+        &mut self,
+        context: &Context<S>,
+        conditions: &mut Conditions,
+    ) {
         #[cfg(feature = "trace")]
         let _span = context.environment.executor.executor_span.enter();
 
@@ -442,7 +448,11 @@ impl ExecutorState {
     ///   have been mutably borrowed (such as the systems currently running).
     /// - `world_cell` must have permission to access all world data (not counting
     ///   any world data that is claimed by systems currently running on this executor).
-    unsafe fn spawn_system_tasks(&mut self, context: &Context, conditions: &mut Conditions) {
+    unsafe fn spawn_system_tasks<S: System<In = (), Out = ()> + ?Sized>(
+        &mut self,
+        context: &Context<S>,
+        conditions: &mut Conditions,
+    ) {
         if self.exclusive_running {
             return;
         }
@@ -586,10 +596,10 @@ impl ExecutorState {
     /// * `world` must have permission to read any world data required by
     ///   the system's conditions: this includes conditions for the system
     ///   itself, and conditions for any of the system's sets.
-    unsafe fn should_run(
+    unsafe fn should_run<S: System<In = (), Out = ()> + ?Sized>(
         &mut self,
         system_index: usize,
-        system: &mut ScheduleSystem,
+        system: &mut Box<S>,
         conditions: &mut Conditions,
         world: UnsafeWorldCell,
         error_handler: ErrorHandler,
@@ -678,7 +688,11 @@ impl ExecutorState {
     /// - `is_exclusive` must have returned `false` for the specified system.
     /// - `world` must have permission to access the world data
     ///   used by the specified system.
-    unsafe fn spawn_system_task(&mut self, context: &Context, system_index: usize) {
+    unsafe fn spawn_system_task<S: System<In = (), Out = ()> + ?Sized>(
+        &mut self,
+        context: &Context<S>,
+        system_index: usize,
+    ) {
         // SAFETY: this system is not running, no other reference exists
         let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
         // Move the full context object into the new future.
@@ -722,7 +736,11 @@ impl ExecutorState {
 
     /// # Safety
     /// Caller must ensure no systems are currently borrowed.
-    unsafe fn spawn_exclusive_system_task(&mut self, context: &Context, system_index: usize) {
+    unsafe fn spawn_exclusive_system_task<S: System<In = (), Out = ()> + ?Sized>(
+        &mut self,
+        context: &Context<S>,
+        system_index: usize,
+    ) {
         // SAFETY: this system is not running, no other reference exists
         let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
         // Move the full context object into the new future.
@@ -806,9 +824,9 @@ impl ExecutorState {
     }
 }
 
-fn apply_deferred(
+fn apply_deferred<S: System<In = (), Out = ()> + ?Sized>(
     unapplied_systems: &FixedBitSet,
-    systems: &[SyncUnsafeCell<SystemWithAccess<dyn System<In = (), Out = ()>>>],
+    systems: &[SyncUnsafeCell<SystemWithAccess<S>>],
     world: &mut World,
 ) -> Result<(), Box<dyn Any + Send>> {
     for system_index in unapplied_systems.ones() {
@@ -835,11 +853,11 @@ fn apply_deferred(
 /// # Safety
 /// - `world` must have permission to read any world data
 ///   required by `conditions`.
-unsafe fn evaluate_and_fold_conditions(
+unsafe fn evaluate_and_fold_conditions<S: System<In = (), Out = ()> + ?Sized>(
     conditions: &mut [ConditionWithAccess],
     world: UnsafeWorldCell,
     error_handler: ErrorHandler,
-    for_system: &ScheduleSystem,
+    for_system: &Box<S>,
     on_set: bool,
 ) -> bool {
     #[expect(

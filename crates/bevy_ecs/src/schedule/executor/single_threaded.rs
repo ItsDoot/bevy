@@ -14,7 +14,7 @@ use crate::{
     schedule::{
         is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
     },
-    system::{RunSystemError, ScheduleSystem},
+    system::{RunSystemError, System},
     world::World,
 };
 
@@ -39,12 +39,12 @@ pub struct SingleThreadedExecutor {
     apply_final_deferred: bool,
 }
 
-impl SystemExecutor for SingleThreadedExecutor {
+impl<S: System<In = (), Out = ()> + ?Sized> SystemExecutor<S> for SingleThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::SingleThreaded
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn init(&mut self, schedule: &SystemSchedule<S>) {
         // pre-allocate space
         let sys_count = schedule.system_ids.len();
         let set_count = schedule.set_ids.len();
@@ -55,7 +55,7 @@ impl SystemExecutor for SingleThreadedExecutor {
 
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        schedule: &mut SystemSchedule<S>,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: ErrorHandler,
@@ -93,7 +93,7 @@ impl SystemExecutor for SingleThreadedExecutor {
                     &mut schedule.set_conditions[set_idx],
                     world,
                     error_handler,
-                    system,
+                    &**system,
                     true,
                 );
 
@@ -111,7 +111,7 @@ impl SystemExecutor for SingleThreadedExecutor {
                 &mut schedule.system_conditions[system_index],
                 world,
                 error_handler,
-                system,
+                &**system,
                 false,
             );
 
@@ -139,7 +139,10 @@ impl SystemExecutor for SingleThreadedExecutor {
 
             let f = AssertUnwindSafe(|| {
                 if let Err(RunSystemError::Failed(err)) =
-                    __rust_begin_short_backtrace::run_without_applying_deferred(system, world)
+                    __rust_begin_short_backtrace::run_without_applying_deferred(
+                        &mut **system,
+                        world,
+                    )
                 {
                     error_handler(
                         err,
@@ -193,7 +196,11 @@ impl SingleThreadedExecutor {
         }
     }
 
-    fn apply_deferred(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
+    fn apply_deferred<S: System<In = (), Out = ()> + ?Sized>(
+        &mut self,
+        schedule: &mut SystemSchedule<S>,
+        world: &mut World,
+    ) {
         for system_index in self.unapplied_systems.ones() {
             let system = &mut schedule.systems[system_index].system;
             system.apply_deferred(world);
@@ -203,11 +210,11 @@ impl SingleThreadedExecutor {
     }
 }
 
-fn evaluate_and_fold_conditions(
+fn evaluate_and_fold_conditions<S: System<In = (), Out = ()> + ?Sized>(
     conditions: &mut [ConditionWithAccess],
     world: &mut World,
     error_handler: ErrorHandler,
-    for_system: &ScheduleSystem,
+    for_system: &S,
     on_set: bool,
 ) -> bool {
     #[cfg(feature = "hotpatching")]

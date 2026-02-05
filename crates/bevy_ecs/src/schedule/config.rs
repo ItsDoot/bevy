@@ -9,7 +9,7 @@ use crate::{
         set::{InternedSystemSet, IntoSystemSet, SystemSet},
         Chain, NodeId, ScheduleGraph,
     },
-    system::{BoxedSystem, IntoSystem, ScheduleSystem, System},
+    system::{IntoSystem, System},
 };
 
 fn new_condition<M>(condition: impl SystemCondition<M>) -> BoxedCondition {
@@ -36,26 +36,26 @@ fn ambiguous_with(graph_info: &mut GraphInfo, set: InternedSystemSet) {
 }
 
 /// Data that can be inserted into a [`ScheduleGraph`] as a node.
-pub trait Schedulable: Sized {
+pub trait Schedulable<S: System + ?Sized>: Sized {
     /// Additional data used to configure independent scheduling. Stored in [`ScheduleConfig`].
     type Metadata;
     /// Additional data used to configure a schedulable group. Stored in [`ScheduleConfigs`].
     type GroupMetadata;
 
     /// Initializes a configuration from this node.
-    fn into_config(self) -> ScheduleConfig<Self>
+    fn into_config(self) -> ScheduleConfig<Self, S>
     where
         Self: Sized;
 
     /// Process a single [`ScheduleConfig`].
-    fn process_config(graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId;
+    fn process_config(graph: &mut ScheduleGraph<S>, config: ScheduleConfig<Self, S>) -> NodeId;
 }
 
-impl Schedulable for ScheduleSystem {
+impl<S: System + ?Sized> Schedulable<S> for Box<dyn System<In = S::In, Out = S::Out>> {
     type Metadata = GraphInfo;
     type GroupMetadata = Chain;
 
-    fn into_config(self) -> ScheduleConfig<Self> {
+    fn into_config(self) -> ScheduleConfig<Self, S> {
         let sets = self.default_system_sets().clone();
         ScheduleConfig {
             node: self,
@@ -67,16 +67,16 @@ impl Schedulable for ScheduleSystem {
         }
     }
 
-    fn process_config(graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId {
+    fn process_config(graph: &mut ScheduleGraph<S>, config: ScheduleConfig<Self, S>) -> NodeId {
         NodeId::System(graph.add_system_inner(config))
     }
 }
 
-impl Schedulable for InternedSystemSet {
+impl<S: System + ?Sized> Schedulable<S> for InternedSystemSet {
     type Metadata = GraphInfo;
     type GroupMetadata = Chain;
 
-    fn into_config(self) -> ScheduleConfig<Self> {
+    fn into_config(self) -> ScheduleConfig<Self, S> {
         assert!(
             self.system_type().is_none(),
             "configuring system type sets is not allowed"
@@ -89,7 +89,7 @@ impl Schedulable for InternedSystemSet {
         }
     }
 
-    fn process_config(graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId {
+    fn process_config(graph: &mut ScheduleGraph<S>, config: ScheduleConfig<Self, S>) -> NodeId {
         NodeId::Set(graph.configure_set_inner(config))
     }
 }
@@ -100,20 +100,20 @@ impl Schedulable for InternedSystemSet {
 /// (hierarchy: in which sets is the node contained,
 /// dependencies: before/after which other nodes should this node run)
 /// and the run conditions associated with this node.
-pub struct ScheduleConfig<T: Schedulable> {
+pub struct ScheduleConfig<T: Schedulable<S>, S: System + ?Sized> {
     pub(crate) node: T,
     pub(crate) metadata: T::Metadata,
     pub(crate) conditions: Vec<BoxedCondition>,
 }
 
 /// Single or nested configurations for [`Schedulable`]s.
-pub enum ScheduleConfigs<T: Schedulable> {
+pub enum ScheduleConfigs<T: Schedulable<S>, S: System + ?Sized> {
     /// Configuration for a single [`Schedulable`].
-    ScheduleConfig(ScheduleConfig<T>),
+    ScheduleConfig(ScheduleConfig<T, S>),
     /// Configuration for a tuple of nested `Configs` instances.
     Configs {
         /// Configuration for each element of the tuple.
-        configs: Vec<ScheduleConfigs<T>>,
+        configs: Vec<ScheduleConfigs<T, S>>,
         /// Run conditions applied to everything in the tuple.
         collective_conditions: Vec<BoxedCondition>,
         /// Metadata to be applied to all elements in the tuple.
@@ -121,7 +121,9 @@ pub enum ScheduleConfigs<T: Schedulable> {
     },
 }
 
-impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> ScheduleConfigs<T> {
+impl<T: Schedulable<S, Metadata = GraphInfo, GroupMetadata = Chain>, S: System + ?Sized>
+    ScheduleConfigs<T, S>
+{
     /// Adds a new boxed system set to the systems.
     pub fn in_set_inner(&mut self, set: InternedSystemSet) {
         match self {
@@ -322,15 +324,17 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> ScheduleConfig
     message = "`{Self}` does not describe a valid system configuration",
     label = "invalid system configuration"
 )]
-pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>, Marker>:
-    Sized
+pub trait IntoScheduleConfigs<T, S, Marker>: Sized
+where
+    T: Schedulable<S, Metadata = GraphInfo, GroupMetadata = Chain>,
+    S: System + ?Sized,
 {
     /// Convert into a [`ScheduleConfigs`].
-    fn into_configs(self) -> ScheduleConfigs<T>;
+    fn into_configs(self) -> ScheduleConfigs<T, S>;
 
     /// Add these systems to the provided `set`.
     #[track_caller]
-    fn in_set(self, set: impl SystemSet) -> ScheduleConfigs<T> {
+    fn in_set(self, set: impl SystemSet) -> ScheduleConfigs<T, S> {
         self.into_configs().in_set(set)
     }
 
@@ -342,7 +346,7 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     ///
     /// Calling [`.chain`](Self::chain) is often more convenient and ensures that all systems are added to the schedule.
     /// Please check the [caveats section of `.after`](Self::after) for details.
-    fn before<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T> {
+    fn before<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T, S> {
         self.into_configs().before(set)
     }
 
@@ -369,7 +373,7 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     /// any ordering calls between them—whether using `.before`, `.after`, or `.chain`—will be silently ignored.
     ///
     /// [`configure_sets`]: https://docs.rs/bevy/latest/bevy/app/struct.App.html#method.configure_sets
-    fn after<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T> {
+    fn after<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T, S> {
         self.into_configs().after(set)
     }
 
@@ -377,7 +381,7 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     ///
     /// Unlike [`before`](Self::before), this will not cause the systems in
     /// `set` to wait for the deferred effects of `self` to be applied.
-    fn before_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T> {
+    fn before_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T, S> {
         self.into_configs().before_ignore_deferred(set)
     }
 
@@ -385,7 +389,7 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     ///
     /// Unlike [`after`](Self::after), this will not wait for the deferred
     /// effects of systems in `set` to be applied.
-    fn after_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T> {
+    fn after_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T, S> {
         self.into_configs().after_ignore_deferred(set)
     }
 
@@ -422,7 +426,7 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     fn distributive_run_if<M>(
         self,
         condition: impl SystemCondition<M> + Clone,
-    ) -> ScheduleConfigs<T> {
+    ) -> ScheduleConfigs<T, S> {
         self.into_configs().distributive_run_if(condition)
     }
 
@@ -456,19 +460,19 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     ///
     /// Use [`distributive_run_if`](IntoScheduleConfigs::distributive_run_if) if you want the
     /// condition to be evaluated for each individual system, right before one is run.
-    fn run_if<M>(self, condition: impl SystemCondition<M>) -> ScheduleConfigs<T> {
+    fn run_if<M>(self, condition: impl SystemCondition<M>) -> ScheduleConfigs<T, S> {
         self.into_configs().run_if(condition)
     }
 
     /// Suppress warnings and errors that would result from these systems having ambiguities
     /// (conflicting access but indeterminate order) with systems in `set`.
-    fn ambiguous_with<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T> {
+    fn ambiguous_with<M>(self, set: impl IntoSystemSet<M>) -> ScheduleConfigs<T, S> {
         self.into_configs().ambiguous_with(set)
     }
 
     /// Suppress warnings and errors that would result from these systems having ambiguities
     /// (conflicting access but indeterminate order) with any other system.
-    fn ambiguous_with_all(self) -> ScheduleConfigs<T> {
+    fn ambiguous_with_all(self) -> ScheduleConfigs<T, S> {
         self.into_configs().ambiguous_with_all()
     }
 
@@ -479,7 +483,7 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     /// If the preceding node on an edge has deferred parameters, an [`ApplyDeferred`](crate::schedule::ApplyDeferred)
     /// will be inserted on the edge. If this behavior is not desired consider using
     /// [`chain_ignore_deferred`](Self::chain_ignore_deferred) instead.
-    fn chain(self) -> ScheduleConfigs<T> {
+    fn chain(self) -> ScheduleConfigs<T, S> {
         self.into_configs().chain()
     }
 
@@ -488,13 +492,15 @@ pub trait IntoScheduleConfigs<T: Schedulable<Metadata = GraphInfo, GroupMetadata
     /// Ordering constraints will be applied between the successive elements.
     ///
     /// Unlike [`chain`](Self::chain) this will **not** add [`ApplyDeferred`](crate::schedule::ApplyDeferred) on the edges.
-    fn chain_ignore_deferred(self) -> ScheduleConfigs<T> {
+    fn chain_ignore_deferred(self) -> ScheduleConfigs<T, S> {
         self.into_configs().chain_ignore_deferred()
     }
 }
 
-impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> IntoScheduleConfigs<T, ()>
-    for ScheduleConfigs<T>
+impl<T, S> IntoScheduleConfigs<T, S, ()> for ScheduleConfigs<T, S>
+where
+    T: Schedulable<S, Metadata = GraphInfo, GroupMetadata = Chain>,
+    S: System + ?Sized,
 {
     fn into_configs(self) -> Self {
         self
@@ -539,12 +545,12 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> IntoScheduleCo
     fn distributive_run_if<M>(
         mut self,
         condition: impl SystemCondition<M> + Clone,
-    ) -> ScheduleConfigs<T> {
+    ) -> ScheduleConfigs<T, S> {
         self.distributive_run_if_inner(condition);
         self
     }
 
-    fn run_if<M>(mut self, condition: impl SystemCondition<M>) -> ScheduleConfigs<T> {
+    fn run_if<M>(mut self, condition: impl SystemCondition<M>) -> ScheduleConfigs<T, S> {
         self.run_if_dyn(new_condition(condition));
         self
     }
@@ -569,25 +575,28 @@ impl<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> IntoScheduleCo
     }
 }
 
-impl<F, Marker> IntoScheduleConfigs<ScheduleSystem, Marker> for F
+impl<F, S, Marker> IntoScheduleConfigs<Box<dyn System<In = S::In, Out = S::Out>>, S, Marker> for F
 where
-    F: IntoSystem<(), (), Marker>,
+    F: IntoSystem<S::In, S::Out, Marker>,
+    S: System + ?Sized,
 {
-    fn into_configs(self) -> ScheduleConfigs<ScheduleSystem> {
+    fn into_configs(self) -> ScheduleConfigs<Box<dyn System<In = S::In, Out = S::Out>>, S> {
         let boxed_system = Box::new(IntoSystem::into_system(self));
-        ScheduleConfigs::ScheduleConfig(ScheduleSystem::into_config(boxed_system))
+        ScheduleConfigs::ScheduleConfig(Schedulable::into_config(boxed_system))
     }
 }
 
-impl IntoScheduleConfigs<ScheduleSystem, ()> for BoxedSystem<(), ()> {
-    fn into_configs(self) -> ScheduleConfigs<ScheduleSystem> {
-        ScheduleConfigs::ScheduleConfig(ScheduleSystem::into_config(self))
+impl<S: System + ?Sized> IntoScheduleConfigs<Box<dyn System<In = S::In, Out = S::Out>>, S, ()>
+    for Box<dyn System<In = S::In, Out = S::Out>>
+{
+    fn into_configs(self) -> ScheduleConfigs<Box<dyn System<In = S::In, Out = S::Out>>, S> {
+        ScheduleConfigs::ScheduleConfig(self.into_config())
     }
 }
 
-impl<S: SystemSet> IntoScheduleConfigs<InternedSystemSet, ()> for S {
-    fn into_configs(self) -> ScheduleConfigs<InternedSystemSet> {
-        ScheduleConfigs::ScheduleConfig(InternedSystemSet::into_config(self.intern()))
+impl<S: System + ?Sized, Set: SystemSet> IntoScheduleConfigs<InternedSystemSet, S, ()> for Set {
+    fn into_configs(self) -> ScheduleConfigs<InternedSystemSet, S> {
+        ScheduleConfigs::ScheduleConfig(self.intern().into_config())
     }
 }
 
@@ -597,9 +606,11 @@ pub struct ScheduleConfigTupleMarker;
 macro_rules! impl_node_type_collection {
     ($(#[$meta:meta])* $(($param: ident, $sys: ident)),*) => {
         $(#[$meta])*
-        impl<$($param, $sys),*, T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>> IntoScheduleConfigs<T, (ScheduleConfigTupleMarker, $($param,)*)> for ($($sys,)*)
+        impl<$($param, $sys),*, T, S> IntoScheduleConfigs<T, S, (ScheduleConfigTupleMarker, $($param,)*)> for ($($sys,)*)
         where
-            $($sys: IntoScheduleConfigs<T, $param>),*
+            T: Schedulable<S, Metadata = GraphInfo, GroupMetadata = Chain>,
+            S: System + ?Sized,
+            $($sys: IntoScheduleConfigs<T, S, $param>),*
         {
             #[expect(
                 clippy::allow_attributes,
@@ -609,7 +620,7 @@ macro_rules! impl_node_type_collection {
                 non_snake_case,
                 reason = "Variable names are provided by the macro caller, not by us."
             )]
-            fn into_configs(self) -> ScheduleConfigs<T> {
+            fn into_configs(self) -> ScheduleConfigs<T, S> {
                 let ($($sys,)*) = self;
                 ScheduleConfigs::Configs {
                     metadata: Default::default(),
@@ -627,5 +638,5 @@ all_tuples!(
     1,
     20,
     P,
-    S
+    C
 );

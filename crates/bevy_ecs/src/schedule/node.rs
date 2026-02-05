@@ -31,12 +31,12 @@ use crate::{
 };
 
 /// A [`SystemWithAccess`] stored in a [`ScheduleGraph`].
-pub(crate) struct SystemNode<S: ?Sized + System> {
+pub(crate) struct SystemNode<S: System + ?Sized> {
     pub(crate) inner: Option<SystemWithAccess<S>>,
 }
 
 /// A [`ScheduleSystem`] stored alongside the access returned from [`System::initialize`].
-pub struct SystemWithAccess<S: ?Sized + System> {
+pub struct SystemWithAccess<S: System + ?Sized> {
     /// The system itself.
     pub system: Box<S>,
     /// The access returned by [`System::initialize`].
@@ -44,7 +44,7 @@ pub struct SystemWithAccess<S: ?Sized + System> {
     pub access: FilteredAccessSet,
 }
 
-impl<S: ?Sized + System> SystemWithAccess<S> {
+impl<S: System + ?Sized> SystemWithAccess<S> {
     /// Constructs a new [`SystemWithAccess`] from a system `S`.
     /// The `access` will initially be empty.
     pub fn new(system: Box<S>) -> Self {
@@ -55,7 +55,7 @@ impl<S: ?Sized + System> SystemWithAccess<S> {
     }
 }
 
-impl<S: ?Sized + System> System for SystemWithAccess<S> {
+impl<S: System + ?Sized> System for SystemWithAccess<S> {
     type In = S::In;
     type Out = S::Out;
 
@@ -235,7 +235,7 @@ impl System for ConditionWithAccess {
     }
 }
 
-impl<S: ?Sized + System> SystemNode<S> {
+impl<S: System + ?Sized> SystemNode<S> {
     /// Create a new [`SystemNode`]
     pub fn new(system: Box<S>) -> Self {
         Self {
@@ -462,7 +462,7 @@ impl From<CompactNodeIdPair> for (NodeId, NodeId) {
 }
 
 /// Container for systems in a schedule.
-pub struct Systems<S: ?Sized + System> {
+pub struct Systems<S: System + ?Sized> {
     /// List of systems in the schedule.
     nodes: SlotMap<SystemKey, SystemNode<S>>,
     /// List of conditions for each system, in the same order as `nodes`.
@@ -471,7 +471,7 @@ pub struct Systems<S: ?Sized + System> {
     uninit: Vec<SystemKey>,
 }
 
-impl<S: ?Sized + System> Systems<S> {
+impl<S: System + ?Sized> Systems<S> {
     /// Returns the number of systems in this container.
     pub fn len(&self) -> usize {
         self.nodes.len()
@@ -649,7 +649,7 @@ impl<S: ?Sized + System> Systems<S> {
     }
 }
 
-impl<S: ?Sized + System> Default for Systems<S> {
+impl<S: System + ?Sized> Default for Systems<S> {
     fn default() -> Self {
         Self {
             nodes: Default::default(),
@@ -659,7 +659,7 @@ impl<S: ?Sized + System> Default for Systems<S> {
     }
 }
 
-impl<S: ?Sized + System> Index<SystemKey> for Systems<S> {
+impl<S: System + ?Sized> Index<SystemKey> for Systems<S> {
     type Output = SystemWithAccess<S>;
 
     #[track_caller]
@@ -669,7 +669,7 @@ impl<S: ?Sized + System> Index<SystemKey> for Systems<S> {
     }
 }
 
-impl<S: ?Sized + System> IndexMut<SystemKey> for Systems<S> {
+impl<S: System + ?Sized> IndexMut<SystemKey> for Systems<S> {
     #[track_caller]
     fn index_mut(&mut self, key: SystemKey) -> &mut Self::Output {
         self.get_mut(key)
@@ -697,9 +697,9 @@ impl ConflictingSystems {
 
     /// Converts the conflicting systems into an iterator of their system names
     /// and the names of the components they conflict on.
-    pub fn to_string(
+    pub fn to_string<S: System + ?Sized>(
         &self,
-        graph: &ScheduleGraph,
+        graph: &ScheduleGraph<S>,
         components: &Components,
     ) -> impl Iterator<Item = (String, String, Box<[DebugName]>)> {
         self.iter().map(move |(system_a, system_b, conflicts)| {

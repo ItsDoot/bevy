@@ -11,11 +11,14 @@ use indexmap::IndexSet;
 use super::{DiGraph, NodeId, ScheduleBuildError, ScheduleGraph};
 use crate::{
     schedule::{graph::Dag, SystemKey, SystemSetKey},
+    system::System,
     world::World,
 };
 
 /// A pass for modular modification of the dependency graph.
-pub trait ScheduleBuildPass: Send + Sync + Debug + 'static {
+pub trait ScheduleBuildPass<S: System + ?Sized = dyn System<In = (), Out = ()>>:
+    Send + Sync + Debug + 'static
+{
     /// Custom options for dependencies between sets or systems.
     type EdgeOptions: 'static;
 
@@ -36,17 +39,17 @@ pub trait ScheduleBuildPass: Send + Sync + Debug + 'static {
     fn build(
         &mut self,
         world: &mut World,
-        graph: &mut ScheduleGraph,
+        graph: &mut ScheduleGraph<S>,
         dependency_flattened: &mut Dag<SystemKey>,
     ) -> Result<(), ScheduleBuildError>;
 }
 
 /// Object safe version of [`ScheduleBuildPass`].
-pub(super) trait ScheduleBuildPassObj: Send + Sync + Debug {
+pub(super) trait ScheduleBuildPassObj<S: System + ?Sized>: Send + Sync + Debug {
     fn build(
         &mut self,
         world: &mut World,
-        graph: &mut ScheduleGraph,
+        graph: &mut ScheduleGraph<S>,
         dependency_flattened: &mut Dag<SystemKey>,
     ) -> Result<(), ScheduleBuildError>;
 
@@ -60,11 +63,11 @@ pub(super) trait ScheduleBuildPassObj: Send + Sync + Debug {
     fn add_dependency(&mut self, from: NodeId, to: NodeId, all_options: &TypeIdMap<Box<dyn Any>>);
 }
 
-impl<T: ScheduleBuildPass> ScheduleBuildPassObj for T {
+impl<T: ScheduleBuildPass<S>, S: System + ?Sized> ScheduleBuildPassObj<S> for T {
     fn build(
         &mut self,
         world: &mut World,
-        graph: &mut ScheduleGraph,
+        graph: &mut ScheduleGraph<S>,
         dependency_flattened: &mut Dag<SystemKey>,
     ) -> Result<(), ScheduleBuildError> {
         self.build(world, graph, dependency_flattened)

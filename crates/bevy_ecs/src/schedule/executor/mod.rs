@@ -27,12 +27,12 @@ use crate::{
 };
 
 /// Types that can run a [`SystemSchedule`] on a [`World`].
-pub(super) trait SystemExecutor: Send + Sync {
+pub(super) trait SystemExecutor<S: System<In = (), Out = ()> + ?Sized>: Send + Sync {
     fn kind(&self) -> ExecutorKind;
-    fn init(&mut self, schedule: &SystemSchedule);
+    fn init(&mut self, schedule: &SystemSchedule<S>);
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
+        schedule: &mut SystemSchedule<S>,
         world: &mut World,
         skip_systems: Option<&FixedBitSet>,
         error_handler: fn(BevyError, ErrorContext),
@@ -72,11 +72,11 @@ pub enum ExecutorKind {
 /// Since the arrays are sorted in the same order, elements are referenced by their index.
 /// [`FixedBitSet`] is used as a smaller, more efficient substitute of `HashSet<usize>`.
 #[derive(Default)]
-pub struct SystemSchedule {
+pub struct SystemSchedule<S: System<In = (), Out = ()> + ?Sized = dyn System<In = (), Out = ()>> {
     /// List of system node ids.
     pub(super) system_ids: Vec<SystemKey>,
     /// Indexed by system node id.
-    pub(super) systems: Vec<SystemWithAccess<dyn System<In = (), Out = ()>>>,
+    pub(super) systems: Vec<SystemWithAccess<S>>,
     /// Indexed by system node id.
     pub(super) system_conditions: Vec<Vec<ConditionWithAccess>>,
     /// Indexed by system node id.
@@ -107,7 +107,7 @@ pub struct SystemSchedule {
     pub(super) systems_in_sets_with_conditions: Vec<FixedBitSet>,
 }
 
-impl SystemSchedule {
+impl<S: System<In = (), Out = ()> + ?Sized> SystemSchedule<S> {
     /// Creates an empty [`SystemSchedule`].
     pub const fn new() -> Self {
         Self {
@@ -152,7 +152,7 @@ impl SystemSchedule {
 pub struct ApplyDeferred;
 
 /// Returns `true` if the [`System`] is an instance of [`ApplyDeferred`].
-pub(super) fn is_apply_deferred(system: &dyn System<In = (), Out = ()>) -> bool {
+pub(super) fn is_apply_deferred<S: System<In = (), Out = ()> + ?Sized>(system: &S) -> bool {
     system.type_id() == TypeId::of::<ApplyDeferred>()
 }
 
@@ -243,13 +243,13 @@ impl IntoSystemSet<()> for ApplyDeferred {
 mod __rust_begin_short_backtrace {
     use core::hint::black_box;
 
-    #[cfg(feature = "std")]
-    use crate::world::unsafe_world_cell::UnsafeWorldCell;
     use crate::{
         error::Result,
-        system::{ReadOnlySystem, RunSystemError, ScheduleSystem},
+        system::{ReadOnlySystem, RunSystemError},
         world::World,
     };
+    #[cfg(feature = "std")]
+    use crate::{system::System, world::unsafe_world_cell::UnsafeWorldCell};
 
     /// # Safety
     /// See `System::run_unsafe`.
@@ -257,7 +257,7 @@ mod __rust_begin_short_backtrace {
     #[cfg(feature = "std")]
     #[inline(never)]
     pub(super) unsafe fn run_unsafe(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: UnsafeWorldCell,
     ) -> Result<(), RunSystemError> {
         // SAFETY: Upheld by caller
@@ -283,8 +283,8 @@ mod __rust_begin_short_backtrace {
 
     #[cfg(feature = "std")]
     #[inline(never)]
-    pub(super) fn run(
-        system: &mut ScheduleSystem,
+    pub(super) fn run<S: System<In = (), Out = ()> + ?Sized>(
+        system: &mut S,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run((), world);
@@ -294,8 +294,8 @@ mod __rust_begin_short_backtrace {
     }
 
     #[inline(never)]
-    pub(super) fn run_without_applying_deferred(
-        system: &mut ScheduleSystem,
+    pub(super) fn run_without_applying_deferred<S: System<In = (), Out = ()> + ?Sized>(
+        system: &mut S,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run_without_applying_deferred((), world);
