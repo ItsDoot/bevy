@@ -569,16 +569,9 @@ impl Schedule {
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
         if self.graph.changed {
             self.graph.initialize(world);
-            let ignored_ambiguities = world
-                .get_resource_or_init::<Schedules>()
-                .ignored_scheduling_ambiguities
-                .clone();
-            self.warnings = self.graph.update_schedule(
-                world,
-                &mut self.executable,
-                &ignored_ambiguities,
-                self.label,
-            )?;
+            self.warnings = self
+                .graph
+                .update_schedule(world, &mut self.executable, self.label)?;
             self.graph.changed = false;
             self.executor_initialized = false;
         }
@@ -1118,7 +1111,6 @@ impl ScheduleGraph {
     pub fn build_schedule(
         &mut self,
         world: &mut World,
-        ignored_ambiguities: &BTreeSet<ComponentId>,
     ) -> Result<(SystemSchedule, Vec<ScheduleBuildWarning>), ScheduleBuildError> {
         let mut warnings = Vec::new();
 
@@ -1198,6 +1190,10 @@ impl ScheduleGraph {
         let flat_ambiguous_with = self.set_systems.flatten_undirected(&self.ambiguous_with);
 
         // Find all system ordering ambiguities, ignoring those that are accepted.
+        let ignored_ambiguities = world
+            .get_resource::<Schedules>()
+            .map(|s| &s.ignored_scheduling_ambiguities)
+            .unwrap_or(const { &BTreeSet::new() });
         self.conflicting_systems = self.systems.get_conflicting_systems(
             &flat_dependency_analysis,
             &flat_ambiguous_with,
@@ -1322,7 +1318,6 @@ impl ScheduleGraph {
         &mut self,
         world: &mut World,
         schedule: &mut SystemSchedule,
-        ignored_ambiguities: &BTreeSet<ComponentId>,
         schedule_label: InternedScheduleLabel,
     ) -> Result<Vec<ScheduleBuildWarning>, ScheduleBuildError> {
         if !self.systems.is_initialized() || !self.system_sets.is_initialized() {
@@ -1355,7 +1350,7 @@ impl ScheduleGraph {
             }
         }
 
-        let (new_schedule, warnings) = self.build_schedule(world, ignored_ambiguities)?;
+        let (new_schedule, warnings) = self.build_schedule(world)?;
         *schedule = new_schedule;
 
         for warning in &warnings {
