@@ -750,7 +750,7 @@ impl ScheduleGraph {
         &self.conflicting_systems
     }
 
-    fn process_config<T: ProcessScheduleConfig + Schedulable>(
+    fn process_config<T: Schedulable>(
         &mut self,
         config: ScheduleConfig<T>,
         collect_nodes: bool,
@@ -764,9 +764,7 @@ impl ScheduleGraph {
         }
     }
 
-    fn apply_collective_conditions<
-        T: ProcessScheduleConfig + Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>,
-    >(
+    fn apply_collective_conditions<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>>(
         &mut self,
         configs: &mut [ScheduleConfigs<T>],
         collective_conditions: Vec<BoxedCondition>,
@@ -797,16 +795,14 @@ impl ScheduleGraph {
     /// - `nodes`: a vector of all node ids contained in the nested `ScheduleConfigs`
     /// - `densely_chained`: a boolean that is true if all nested nodes are linearly chained (with successive `after` orderings) in the order they are defined
     #[track_caller]
-    fn process_configs<
-        T: ProcessScheduleConfig + Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>,
-    >(
+    fn process_configs<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>>(
         &mut self,
         configs: ScheduleConfigs<T>,
         collect_nodes: bool,
     ) -> ProcessConfigsResult {
         match configs {
-            ScheduleConfigs::ScheduleConfig(config) => self.process_config(config, collect_nodes),
-            ScheduleConfigs::Configs {
+            ScheduleConfigs::Single(config) => self.process_config(config, collect_nodes),
+            ScheduleConfigs::Group {
                 metadata,
                 mut configs,
                 collective_conditions,
@@ -884,7 +880,7 @@ impl ScheduleGraph {
     }
 
     /// Add a [`ScheduleConfig`] to the graph, including its dependencies and conditions.
-    fn add_system_inner(&mut self, config: ScheduleConfig<ScheduleSystem>) -> SystemKey {
+    pub(crate) fn add_system_inner(&mut self, config: ScheduleConfig<ScheduleSystem>) -> SystemKey {
         let key = self.systems.insert(config.node, config.conditions);
 
         // graph updates are immediate
@@ -899,7 +895,10 @@ impl ScheduleGraph {
     }
 
     /// Add a single `ScheduleConfig` to the graph, including its dependencies and conditions.
-    fn configure_set_inner(&mut self, config: ScheduleConfig<InternedSystemSet>) -> SystemSetKey {
+    pub(crate) fn configure_set_inner(
+        &mut self,
+        config: ScheduleConfig<InternedSystemSet>,
+    ) -> SystemSetKey {
         let key = self.system_sets.insert(config.node, config.conditions);
 
         // graph updates are immediate
@@ -1392,24 +1391,6 @@ struct ProcessConfigsResult {
     /// are linearly chained (as if `after` system ordering had been applied between each node)
     /// in the order they are defined
     densely_chained: bool,
-}
-
-/// Trait used by [`ScheduleGraph::process_configs`] to process a single [`ScheduleConfig`].
-trait ProcessScheduleConfig: Schedulable + Sized {
-    /// Process a single [`ScheduleConfig`].
-    fn process_config(schedule_graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId;
-}
-
-impl ProcessScheduleConfig for ScheduleSystem {
-    fn process_config(schedule_graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId {
-        NodeId::System(schedule_graph.add_system_inner(config))
-    }
-}
-
-impl ProcessScheduleConfig for InternedSystemSet {
-    fn process_config(schedule_graph: &mut ScheduleGraph, config: ScheduleConfig<Self>) -> NodeId {
-        NodeId::Set(schedule_graph.configure_set_inner(config))
-    }
 }
 
 /// Policy to use when removing systems.
