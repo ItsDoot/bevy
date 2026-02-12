@@ -7,7 +7,6 @@ use alloc::{
     collections::BTreeSet,
     format,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use bevy_platform::{
@@ -19,7 +18,6 @@ use core::{
     any::{Any, TypeId},
     fmt::{Debug, Write},
 };
-use fixedbitset::FixedBitSet;
 use indexmap::{IndexMap, IndexSet};
 use log::{info, warn};
 use pass::ScheduleBuildPassObj;
@@ -348,9 +346,7 @@ impl Chain {
 pub struct Schedule {
     label: InternedScheduleLabel,
     graph: ScheduleGraph,
-    executable: SystemSchedule,
     executor: Box<dyn SystemExecutor>,
-    executor_initialized: bool,
     warnings: Vec<ScheduleBuildWarning>,
 }
 
@@ -373,9 +369,7 @@ impl Schedule {
         let mut this = Self {
             label: label.intern(),
             graph: ScheduleGraph::new(),
-            executable: SystemSchedule::new(),
             executor: make_executor(ExecutorKind::default()),
-            executor_initialized: false,
             warnings: Vec::new(),
         };
         // Call `set_build_settings` to add any default build passes
@@ -512,7 +506,6 @@ impl Schedule {
     pub fn set_executor_kind(&mut self, executor: ExecutorKind) -> &mut Self {
         if executor != self.executor.kind() {
             self.executor = make_executor(executor);
-            self.executor_initialized = false;
         }
         self
     }
@@ -544,7 +537,8 @@ impl Schedule {
 
         #[cfg(not(feature = "bevy_debug_stepping"))]
         self.executor
-            .run(&mut self.executable, world, None, error_handler);
+            .run(world, None, error_handler)
+            .unwrap_or_else(|_| unreachable!("The schedule was just initialized"));
 
         #[cfg(feature = "bevy_debug_stepping")]
         {
@@ -553,12 +547,9 @@ impl Schedule {
                 Some(mut stepping) => stepping.skipped_systems(self),
             };
 
-            self.executor.run(
-                &mut self.executable,
-                world,
-                skip_systems.as_ref(),
-                error_handler,
-            );
+            self.executor
+                .run(world, skip_systems.as_ref(), error_handler)
+                .unwrap_or_else(|_| unreachable!("The schedule was just initialized"));
         }
     }
 
@@ -567,25 +558,24 @@ impl Schedule {
     ///
     /// Moves all systems and run conditions out of the [`ScheduleGraph`].
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
-        if self.graph.changed {
+        if self.graph.changed || !self.executor.is_initialized() {
+            self.executor.deinitialize(&mut self.graph);
             self.graph.initialize(world);
-            let ignored_ambiguities = world
-                .get_resource_or_init::<Schedules>()
-                .ignored_scheduling_ambiguities
-                .clone();
-            self.warnings = self.graph.update_schedule(
-                world,
-                &mut self.executable,
-                &ignored_ambiguities,
-                self.label,
-            )?;
-            self.graph.changed = false;
-            self.executor_initialized = false;
-        }
 
-        if !self.executor_initialized {
-            self.executor.init(&self.executable);
-            self.executor_initialized = true;
+            let (flat_dependency, hierarchy_analysis, warnings) =
+                self.graph.build_schedule(world, None)?;
+
+            for warning in &warnings {
+                warn!(
+                    "{:?} schedule built successfully, however: {}",
+                    self.label,
+                    warning.to_string(self.graph(), world)
+                );
+            }
+            self.warnings = warnings;
+
+            self.executor
+                .initialize(&mut self.graph, &flat_dependency, &hierarchy_analysis);
         }
 
         Ok(())
@@ -603,30 +593,16 @@ impl Schedule {
 
     /// Returns the [`SystemSchedule`].
     pub(crate) fn executable(&self) -> &SystemSchedule {
-        &self.executable
+        self.executor
+            .executable()
+            .unwrap_or(const { &SystemSchedule::empty() })
     }
 
     /// Iterates the change ticks of all systems in the schedule and clamps any older than
     /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
     /// This prevents overflow and thus prevents false positives.
     pub fn check_change_ticks(&mut self, check: CheckChangeTicks) {
-        for system in &mut self.executable.systems {
-            if !is_apply_deferred(system) {
-                system.check_change_tick(check);
-            }
-        }
-
-        for conditions in &mut self.executable.system_conditions {
-            for condition in conditions {
-                condition.check_change_tick(check);
-            }
-        }
-
-        for conditions in &mut self.executable.set_conditions {
-            for condition in conditions {
-                condition.check_change_tick(check);
-            }
-        }
+        self.executor.check_change_ticks(check);
     }
 
     /// Directly applies any accumulated [`Deferred`](crate::system::Deferred) system parameters (like [`Commands`](crate::prelude::Commands)) to the `world`.
@@ -638,9 +614,7 @@ impl Schedule {
     /// This is used in rendering to extract data from the main world, storing the data in system buffers,
     /// before applying their buffers in a different world.
     pub fn apply_deferred(&mut self, world: &mut World) {
-        for SystemWithAccess { system, .. } in &mut self.executable.systems {
-            system.apply_deferred(world);
-        }
+        self.executor.apply_deferred(world);
     }
 
     /// Returns an iterator over all systems in this schedule.
@@ -649,17 +623,16 @@ impl Schedule {
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (SystemKey, &ScheduleSystem)> + Sized, ScheduleNotInitialized>
-    {
-        if !self.executor_initialized {
+    ) -> Result<impl Iterator<Item = (SystemKey, &ScheduleSystem)>, ScheduleNotInitialized> {
+        if !self.executor.is_initialized() {
             return Err(ScheduleNotInitialized);
         }
 
         let iter = self
-            .executable
+            .executable()
             .system_ids
             .iter()
-            .zip(&self.executable.systems)
+            .zip(&self.executable().systems)
             .map(|(&node_id, system)| (node_id, &system.system));
 
         Ok(iter)
@@ -667,10 +640,10 @@ impl Schedule {
 
     /// Returns the number of systems in this schedule.
     pub fn systems_len(&self) -> usize {
-        if !self.executor_initialized {
+        if !self.executor.is_initialized() {
             self.graph.systems.len()
         } else {
-            self.executable.systems.len()
+            self.executable().systems.len()
         }
     }
 
@@ -1117,8 +1090,15 @@ impl ScheduleGraph {
     pub fn build_schedule(
         &mut self,
         world: &mut World,
-        ignored_ambiguities: &BTreeSet<ComponentId>,
-    ) -> Result<(SystemSchedule, Vec<ScheduleBuildWarning>), ScheduleBuildError> {
+        ignored_ambiguities: Option<&BTreeSet<ComponentId>>,
+    ) -> Result<
+        (
+            Dag<SystemKey>,
+            DagAnalysis<NodeId>,
+            Vec<ScheduleBuildWarning>,
+        ),
+        ScheduleBuildError,
+    > {
         let mut warnings = Vec::new();
 
         // Check system set memberships for cycles.
@@ -1196,6 +1176,18 @@ impl ScheduleGraph {
         // ambiguous ordering with all systems in the second set.
         let flat_ambiguous_with = self.set_systems.flatten_undirected(&self.ambiguous_with);
 
+        // If the caller provided a set of ignored ambiguity component ids, use those.
+        // Otherwise try to load them from the `Schedules` resource.
+        // If neither is available, use an empty set.
+        let ignored_ambiguities = ignored_ambiguities
+            .or_else(|| {
+                Some(
+                    &world
+                        .get_resource::<Schedules>()?
+                        .ignored_scheduling_ambiguities,
+                )
+            })
+            .unwrap_or(const { &BTreeSet::new() });
         // Find all system ordering ambiguities, ignoring those that are accepted.
         self.conflicting_systems = self.systems.get_conflicting_systems(
             &flat_dependency_analysis,
@@ -1214,171 +1206,10 @@ impl ScheduleGraph {
             }
         }
 
+        self.changed = false;
+
         // build the schedule
-        Ok((
-            self.build_schedule_inner(flat_dependency, hierarchy_analysis),
-            warnings,
-        ))
-    }
-
-    fn build_schedule_inner(
-        &self,
-        flat_dependency: Dag<SystemKey>,
-        hierarchy_analysis: DagAnalysis<NodeId>,
-    ) -> SystemSchedule {
-        let dg_system_ids = flat_dependency.get_toposort().unwrap().to_vec();
-        let dg_system_idx_map = dg_system_ids
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, id)| (id, i))
-            .collect::<HashMap<_, _>>();
-
-        let hierarchy_toposort = self.hierarchy.get_toposort().unwrap();
-        let hg_systems = hierarchy_toposort
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(i, id)| Some((i, id.as_system()?)))
-            .collect::<Vec<_>>();
-        let (hg_set_with_conditions_idxs, hg_set_ids): (Vec<_>, Vec<_>) = hierarchy_toposort
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(i, id)| {
-                // ignore system sets that have no conditions
-                // ignore system type sets (already covered, they don't have conditions)
-                let key = id.as_set()?;
-                self.system_sets.has_conditions(key).then_some((i, key))
-            })
-            .unzip();
-
-        let sys_count = self.systems.len();
-        let set_with_conditions_count = hg_set_ids.len();
-        let hg_node_count = self.hierarchy.node_count();
-
-        // get the number of dependencies and the immediate dependents of each system
-        // (needed by multi_threaded executor to run systems in the correct order)
-        let mut system_dependencies = Vec::with_capacity(sys_count);
-        let mut system_dependents = Vec::with_capacity(sys_count);
-        for &sys_key in &dg_system_ids {
-            let num_dependencies = flat_dependency
-                .neighbors_directed(sys_key, Incoming)
-                .count();
-
-            let dependents = flat_dependency
-                .neighbors_directed(sys_key, Outgoing)
-                .map(|dep_id| dg_system_idx_map[&dep_id])
-                .collect::<Vec<_>>();
-
-            system_dependencies.push(num_dependencies);
-            system_dependents.push(dependents);
-        }
-
-        // get the rows and columns of the hierarchy graph's reachability matrix
-        // (needed to we can evaluate conditions in the correct order)
-        let mut systems_in_sets_with_conditions =
-            vec![FixedBitSet::with_capacity(sys_count); set_with_conditions_count];
-        for (i, &row) in hg_set_with_conditions_idxs.iter().enumerate() {
-            let bitset = &mut systems_in_sets_with_conditions[i];
-            for &(col, sys_key) in &hg_systems {
-                let idx = dg_system_idx_map[&sys_key];
-                let is_descendant = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
-                bitset.set(idx, is_descendant);
-            }
-        }
-
-        let mut sets_with_conditions_of_systems =
-            vec![FixedBitSet::with_capacity(set_with_conditions_count); sys_count];
-        for &(col, sys_key) in &hg_systems {
-            let i = dg_system_idx_map[&sys_key];
-            let bitset = &mut sets_with_conditions_of_systems[i];
-            for (idx, &row) in hg_set_with_conditions_idxs
-                .iter()
-                .enumerate()
-                .take_while(|&(_idx, &row)| row < col)
-            {
-                let is_ancestor = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
-                bitset.set(idx, is_ancestor);
-            }
-        }
-
-        SystemSchedule {
-            systems: Vec::with_capacity(sys_count),
-            system_conditions: Vec::with_capacity(sys_count),
-            set_conditions: Vec::with_capacity(set_with_conditions_count),
-            system_ids: dg_system_ids,
-            set_ids: hg_set_ids,
-            system_dependencies,
-            system_dependents,
-            sets_with_conditions_of_systems,
-            systems_in_sets_with_conditions,
-        }
-    }
-
-    /// Updates the `SystemSchedule` from the `ScheduleGraph`.
-    fn update_schedule(
-        &mut self,
-        world: &mut World,
-        schedule: &mut SystemSchedule,
-        ignored_ambiguities: &BTreeSet<ComponentId>,
-        schedule_label: InternedScheduleLabel,
-    ) -> Result<Vec<ScheduleBuildWarning>, ScheduleBuildError> {
-        if !self.systems.is_initialized() || !self.system_sets.is_initialized() {
-            return Err(ScheduleBuildError::Uninitialized);
-        }
-
-        // move systems out of old schedule
-        for ((key, system), conditions) in schedule
-            .system_ids
-            .drain(..)
-            .zip(schedule.systems.drain(..))
-            .zip(schedule.system_conditions.drain(..))
-        {
-            if let Some(node) = self.systems.node_mut(key) {
-                node.inner = Some(system);
-            }
-
-            if let Some(node_conditions) = self.systems.get_conditions_mut(key) {
-                *node_conditions = conditions;
-            }
-        }
-
-        for (key, conditions) in schedule
-            .set_ids
-            .drain(..)
-            .zip(schedule.set_conditions.drain(..))
-        {
-            if let Some(node_conditions) = self.system_sets.get_conditions_mut(key) {
-                *node_conditions = conditions;
-            }
-        }
-
-        let (new_schedule, warnings) = self.build_schedule(world, ignored_ambiguities)?;
-        *schedule = new_schedule;
-
-        for warning in &warnings {
-            warn!(
-                "{:?} schedule built successfully, however: {}",
-                schedule_label,
-                warning.to_string(self, world)
-            );
-        }
-
-        // move systems into new schedule
-        for &key in &schedule.system_ids {
-            let system = self.systems.node_mut(key).unwrap().inner.take().unwrap();
-            let conditions = core::mem::take(self.systems.get_conditions_mut(key).unwrap());
-            schedule.systems.push(system);
-            schedule.system_conditions.push(conditions);
-        }
-
-        for &key in &schedule.set_ids {
-            let conditions = core::mem::take(self.system_sets.get_conditions_mut(key).unwrap());
-            schedule.set_conditions.push(conditions);
-        }
-
-        Ok(warnings)
+        Ok((flat_dependency, hierarchy_analysis, warnings))
     }
 }
 
@@ -1670,7 +1501,7 @@ mod tests {
         schedule.run(&mut world);
 
         // inserted a sync point
-        assert_eq!(schedule.executable.systems.len(), 3);
+        assert_eq!(schedule.executable().systems.len(), 3);
     }
 
     #[test]
@@ -1688,7 +1519,7 @@ mod tests {
         schedule.run(&mut world);
 
         // No sync point was inserted, since we can reuse the explicit sync point.
-        assert_eq!(schedule.executable.systems.len(), 5);
+        assert_eq!(schedule.executable().systems.len(), 5);
     }
 
     #[test]
@@ -1706,7 +1537,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable.systems.len(), 6);
+        assert_eq!(schedule.executable().systems.len(), 6);
     }
 
     #[test]
@@ -1724,7 +1555,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable.systems.len(), 6);
+        assert_eq!(schedule.executable().systems.len(), 6);
     }
 
     #[test]
@@ -1746,7 +1577,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable.systems.len(), 6);
+        assert_eq!(schedule.executable().systems.len(), 6);
     }
 
     #[test]
@@ -1772,7 +1603,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable.systems.len(), 6);
+        assert_eq!(schedule.executable().systems.len(), 6);
     }
 
     #[test]
@@ -1793,7 +1624,7 @@ mod tests {
         schedule.run(&mut world);
 
         // inserted sync points
-        assert_eq!(schedule.executable.systems.len(), 4);
+        assert_eq!(schedule.executable().systems.len(), 4);
 
         // merges sync points on rebuild
         schedule.add_systems(((
@@ -1806,7 +1637,7 @@ mod tests {
             .chain(),));
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable.systems.len(), 7);
+        assert_eq!(schedule.executable().systems.len(), 7);
     }
 
     #[test]
@@ -1824,7 +1655,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable.systems.len(), 5);
+        assert_eq!(schedule.executable().systems.len(), 5);
     }
 
     #[test]
@@ -1848,7 +1679,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable.systems.len(), 6); // 5 systems + 1 sync point
+        assert_eq!(schedule.executable().systems.len(), 6); // 5 systems + 1 sync point
     }
 
     #[test]
@@ -1881,7 +1712,7 @@ mod tests {
 
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable.systems.len(), 4); // 3 systems + 1 sync point
+        assert_eq!(schedule.executable().systems.len(), 4); // 3 systems + 1 sync point
     }
 
     #[test]
@@ -1901,7 +1732,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable.systems.len(), 2);
+        assert_eq!(schedule.executable().systems.len(), 2);
     }
 
     mod no_sync_edges {
@@ -1928,7 +1759,7 @@ mod tests {
 
             schedule.run(&mut world);
 
-            assert_eq!(schedule.executable.systems.len(), 2);
+            assert_eq!(schedule.executable().systems.len(), 2);
         }
 
         #[test]
@@ -2013,7 +1844,7 @@ mod tests {
 
             schedule.run(&mut world);
 
-            assert_eq!(schedule.executable.systems.len(), expected_num_systems);
+            assert_eq!(schedule.executable().systems.len(), expected_num_systems);
         }
 
         #[test]

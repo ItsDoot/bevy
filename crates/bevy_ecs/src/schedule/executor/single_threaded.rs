@@ -10,11 +10,14 @@ use tracing::info_span;
 use std::eprintln;
 
 use crate::{
-    error::{ErrorContext, ErrorHandler},
+    change_detection::CheckChangeTicks,
+    error::{ErrorContext, ErrorHandler, Result},
     schedule::{
-        is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
+        graph::{Dag, DagAnalysis},
+        is_apply_deferred, ConditionWithAccess, ExecutorKind, NodeId, ScheduleGraph,
+        ScheduleNotInitialized, SystemExecutor, SystemKey, SystemSchedule,
     },
-    system::{RunSystemError, ScheduleSystem},
+    system::{RunSystemError, ScheduleSystem, System},
     world::World,
 };
 
@@ -29,6 +32,7 @@ use super::__rust_begin_short_backtrace;
 /// other things, or just trying minimize overhead.
 #[derive(Default)]
 pub struct SingleThreadedExecutor {
+    executable: Option<SystemSchedule>,
     /// System sets whose conditions have been evaluated.
     evaluated_sets: FixedBitSet,
     /// Systems that have run or been skipped.
@@ -44,22 +48,37 @@ impl SystemExecutor for SingleThreadedExecutor {
         ExecutorKind::SingleThreaded
     }
 
-    fn init(&mut self, schedule: &SystemSchedule) {
+    fn deinitialize(&mut self, graph: &mut ScheduleGraph) {
+        if let Some(executable) = self.executable.take() {
+            executable.backfill(graph);
+        }
+    }
+
+    fn initialize(
+        &mut self,
+        graph: &mut ScheduleGraph,
+        flat_dependency: &Dag<SystemKey>,
+        hierarchy_analysis: &DagAnalysis<NodeId>,
+    ) {
+        let (mut executable, _) = SystemSchedule::new(graph, flat_dependency, hierarchy_analysis);
+        executable.fill(graph);
+
         // pre-allocate space
-        let sys_count = schedule.system_ids.len();
-        let set_count = schedule.set_ids.len();
+        let sys_count = executable.system_ids.len();
+        let set_count = executable.set_ids.len();
         self.evaluated_sets = FixedBitSet::with_capacity(set_count);
         self.completed_systems = FixedBitSet::with_capacity(sys_count);
         self.unapplied_systems = FixedBitSet::with_capacity(sys_count);
+
+        self.executable = Some(executable);
     }
 
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
         world: &mut World,
         _skip_systems: Option<&FixedBitSet>,
         error_handler: ErrorHandler,
-    ) {
+    ) -> Result<(), ScheduleNotInitialized> {
         // If stepping is enabled, make sure we skip those systems that should
         // not be run.
         #[cfg(feature = "bevy_debug_stepping")]
@@ -74,8 +93,10 @@ impl SystemExecutor for SingleThreadedExecutor {
             .map(|r| r.last_changed())
             .unwrap_or_default();
 
-        for system_index in 0..schedule.systems.len() {
-            let system = &mut schedule.systems[system_index].system;
+        let executable = self.executable.as_mut().ok_or(ScheduleNotInitialized)?;
+
+        for system_index in 0..executable.systems.len() {
+            let system = &mut executable.systems[system_index].system;
 
             #[cfg(feature = "trace")]
             let name = system.name();
@@ -83,14 +104,14 @@ impl SystemExecutor for SingleThreadedExecutor {
             let should_run_span = info_span!("check_conditions", name = name.to_string()).entered();
 
             let mut should_run = !self.completed_systems.contains(system_index);
-            for set_idx in schedule.sets_with_conditions_of_systems[system_index].ones() {
+            for set_idx in executable.sets_with_conditions_of_systems[system_index].ones() {
                 if self.evaluated_sets.contains(set_idx) {
                     continue;
                 }
 
                 // evaluate system set's conditions
                 let set_conditions_met = evaluate_and_fold_conditions(
-                    &mut schedule.set_conditions[set_idx],
+                    &mut executable.set_conditions[set_idx],
                     world,
                     error_handler,
                     system,
@@ -99,7 +120,7 @@ impl SystemExecutor for SingleThreadedExecutor {
 
                 if !set_conditions_met {
                     self.completed_systems
-                        .union_with(&schedule.systems_in_sets_with_conditions[set_idx]);
+                        .union_with(&executable.systems_in_sets_with_conditions[set_idx]);
                 }
 
                 should_run &= set_conditions_met;
@@ -108,7 +129,7 @@ impl SystemExecutor for SingleThreadedExecutor {
 
             // evaluate system's conditions
             let system_conditions_met = evaluate_and_fold_conditions(
-                &mut schedule.system_conditions[system_index],
+                &mut executable.system_conditions[system_index],
                 world,
                 error_handler,
                 system,
@@ -133,7 +154,12 @@ impl SystemExecutor for SingleThreadedExecutor {
             }
 
             if is_apply_deferred(&**system) {
-                self.apply_deferred(schedule, world);
+                for system_index in self.unapplied_systems.ones() {
+                    executable.systems[system_index]
+                        .system
+                        .apply_deferred(world);
+                }
+                self.unapplied_systems.clear();
                 continue;
             }
 
@@ -169,14 +195,52 @@ impl SystemExecutor for SingleThreadedExecutor {
         }
 
         if self.apply_final_deferred {
-            self.apply_deferred(schedule, world);
+            self.apply_deferred(world);
         }
         self.evaluated_sets.clear();
         self.completed_systems.clear();
+        Ok(())
     }
 
     fn set_apply_final_deferred(&mut self, apply_final_deferred: bool) {
         self.apply_final_deferred = apply_final_deferred;
+    }
+
+    fn check_change_ticks(&mut self, check: CheckChangeTicks) {
+        if let Some(executable) = &mut self.executable {
+            for system in &mut executable.systems {
+                if !is_apply_deferred(system) {
+                    system.check_change_tick(check);
+                }
+            }
+
+            for conditions in &mut executable.system_conditions {
+                for condition in conditions {
+                    condition.check_change_tick(check);
+                }
+            }
+
+            for conditions in &mut executable.set_conditions {
+                for condition in conditions {
+                    condition.check_change_tick(check);
+                }
+            }
+        }
+    }
+
+    fn apply_deferred(&mut self, world: &mut World) {
+        if let Some(executable) = &mut self.executable {
+            for system_index in self.unapplied_systems.ones() {
+                executable.systems[system_index]
+                    .system
+                    .apply_deferred(world);
+            }
+            self.unapplied_systems.clear();
+        }
+    }
+
+    fn executable(&self) -> Option<&SystemSchedule> {
+        self.executable.as_ref()
     }
 }
 
@@ -186,20 +250,12 @@ impl SingleThreadedExecutor {
     /// [`Schedule`]: crate::schedule::Schedule
     pub const fn new() -> Self {
         Self {
+            executable: None,
             evaluated_sets: FixedBitSet::new(),
             completed_systems: FixedBitSet::new(),
             unapplied_systems: FixedBitSet::new(),
             apply_final_deferred: true,
         }
-    }
-
-    fn apply_deferred(&mut self, schedule: &mut SystemSchedule, world: &mut World) {
-        for system_index in self.unapplied_systems.ones() {
-            let system = &mut schedule.systems[system_index].system;
-            system.apply_deferred(world);
-        }
-
-        self.unapplied_systems.clear();
     }
 }
 

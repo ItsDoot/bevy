@@ -5,6 +5,7 @@ mod single_threaded;
 use alloc::{vec, vec::Vec};
 use bevy_utils::prelude::DebugName;
 use core::any::TypeId;
+use slotmap::SecondaryMap;
 
 pub use self::single_threaded::SingleThreadedExecutor;
 
@@ -19,8 +20,9 @@ use crate::{
     prelude::{IntoSystemSet, SystemSet},
     query::FilteredAccessSet,
     schedule::{
-        ConditionWithAccess, InternedSystemSet, SystemKey, SystemSetKey, SystemTypeSet,
-        SystemWithAccess,
+        graph::{index, Dag, DagAnalysis},
+        ConditionWithAccess, InternedSystemSet, NodeId, ScheduleGraph, ScheduleNotInitialized,
+        SystemKey, SystemSetKey, SystemTypeSet, SystemWithAccess,
     },
     system::{RunSystemError, System, SystemIn, SystemParamValidationError, SystemStateFlags},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
@@ -29,15 +31,34 @@ use crate::{
 /// Types that can run a [`SystemSchedule`] on a [`World`].
 pub(super) trait SystemExecutor: Send + Sync {
     fn kind(&self) -> ExecutorKind;
-    fn init(&mut self, schedule: &SystemSchedule);
+
+    fn is_initialized(&self) -> bool {
+        self.executable().is_some()
+    }
+
+    fn deinitialize(&mut self, graph: &mut ScheduleGraph);
+
+    fn initialize(
+        &mut self,
+        graph: &mut ScheduleGraph,
+        flat_dependency: &Dag<SystemKey>,
+        hierarchy_analysis: &DagAnalysis<NodeId>,
+    );
+
     fn run(
         &mut self,
-        schedule: &mut SystemSchedule,
         world: &mut World,
         skip_systems: Option<&FixedBitSet>,
         error_handler: fn(BevyError, ErrorContext),
-    );
+    ) -> Result<(), ScheduleNotInitialized>;
+
     fn set_apply_final_deferred(&mut self, value: bool);
+
+    fn check_change_ticks(&mut self, check: CheckChangeTicks);
+
+    fn apply_deferred(&mut self, world: &mut World);
+
+    fn executable(&self) -> Option<&SystemSchedule>;
 }
 
 /// Specifies how a [`Schedule`](super::Schedule) will be run.
@@ -80,20 +101,6 @@ pub struct SystemSchedule {
     /// Indexed by system node id.
     pub(super) system_conditions: Vec<Vec<ConditionWithAccess>>,
     /// Indexed by system node id.
-    /// Number of systems that the system immediately depends on.
-    #[cfg_attr(
-        not(feature = "std"),
-        expect(dead_code, reason = "currently only used with the std feature")
-    )]
-    pub(super) system_dependencies: Vec<usize>,
-    /// Indexed by system node id.
-    /// List of systems that immediately depend on the system.
-    #[cfg_attr(
-        not(feature = "std"),
-        expect(dead_code, reason = "currently only used with the std feature")
-    )]
-    pub(super) system_dependents: Vec<Vec<usize>>,
-    /// Indexed by system node id.
     /// List of sets containing the system that have conditions
     pub(super) sets_with_conditions_of_systems: Vec<FixedBitSet>,
     /// List of system set node ids.
@@ -109,17 +116,140 @@ pub struct SystemSchedule {
 
 impl SystemSchedule {
     /// Creates an empty [`SystemSchedule`].
-    pub const fn new() -> Self {
+    pub const fn empty() -> Self {
         Self {
+            system_ids: Vec::new(),
             systems: Vec::new(),
             system_conditions: Vec::new(),
-            set_conditions: Vec::new(),
-            system_ids: Vec::new(),
-            set_ids: Vec::new(),
-            system_dependencies: Vec::new(),
-            system_dependents: Vec::new(),
             sets_with_conditions_of_systems: Vec::new(),
+            set_ids: Vec::new(),
+            set_conditions: Vec::new(),
             systems_in_sets_with_conditions: Vec::new(),
+        }
+    }
+
+    /// Creates a new schedule executable from the given graph and its analyses.
+    /// It should be initialized with [`fill`] before it can be run.
+    pub fn new(
+        graph: &ScheduleGraph,
+        flat_dependency: &Dag<SystemKey>,
+        hierarchy_analysis: &DagAnalysis<NodeId>,
+    ) -> (Self, SecondaryMap<SystemKey, usize>) {
+        let dg_system_ids = flat_dependency.get_toposort().unwrap().to_vec();
+        let dg_system_idx_map = dg_system_ids
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, id)| (id, i))
+            .collect::<SecondaryMap<_, _>>();
+
+        let hierarchy_toposort = graph.hierarchy().get_toposort().unwrap();
+        let hg_systems = hierarchy_toposort
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(i, id)| Some((i, id.as_system()?)))
+            .collect::<Vec<_>>();
+        let (hg_set_with_conditions_idxs, hg_set_ids): (Vec<_>, Vec<_>) = hierarchy_toposort
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(i, id)| {
+                // ignore system sets that have no conditions
+                // ignore system type sets (already covered, they don't have conditions)
+                let key = id.as_set()?;
+                graph.system_sets.has_conditions(key).then_some((i, key))
+            })
+            .unzip();
+
+        let sys_count = graph.systems.len();
+        let set_with_conditions_count = hg_set_ids.len();
+        let hg_node_count = graph.hierarchy().node_count();
+
+        // get the rows and columns of the hierarchy graph's reachability matrix
+        // (needed to we can evaluate conditions in the correct order)
+        let mut systems_in_sets_with_conditions =
+            vec![FixedBitSet::with_capacity(sys_count); set_with_conditions_count];
+        for (i, &row) in hg_set_with_conditions_idxs.iter().enumerate() {
+            let bitset = &mut systems_in_sets_with_conditions[i];
+            for &(col, sys_key) in &hg_systems {
+                let idx = dg_system_idx_map[sys_key];
+                let is_descendant = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
+                bitset.set(idx, is_descendant);
+            }
+        }
+
+        let mut sets_with_conditions_of_systems =
+            vec![FixedBitSet::with_capacity(set_with_conditions_count); sys_count];
+        for &(col, sys_key) in &hg_systems {
+            let i = dg_system_idx_map[sys_key];
+            let bitset = &mut sets_with_conditions_of_systems[i];
+            for (idx, &row) in hg_set_with_conditions_idxs
+                .iter()
+                .enumerate()
+                .take_while(|&(_idx, &row)| row < col)
+            {
+                let is_ancestor = hierarchy_analysis.reachable()[index(row, col, hg_node_count)];
+                bitset.set(idx, is_ancestor);
+            }
+        }
+
+        (
+            Self {
+                systems: Vec::with_capacity(sys_count),
+                system_conditions: Vec::with_capacity(sys_count),
+                set_conditions: Vec::with_capacity(set_with_conditions_count),
+                system_ids: dg_system_ids,
+                set_ids: hg_set_ids,
+                sets_with_conditions_of_systems,
+                systems_in_sets_with_conditions,
+            },
+            dg_system_idx_map,
+        )
+    }
+
+    /// Moves system-like data out of the graph and into the schedule, so that
+    /// the executor can run systems from the schedule.
+    pub fn fill(&mut self, graph: &mut ScheduleGraph) {
+        // Move systems and their conditions out of the graph and into the schedule.
+        for &key in &self.system_ids {
+            let system = graph.systems.node_mut(key).unwrap().inner.take().unwrap();
+            let conditions = core::mem::take(graph.systems.get_conditions_mut(key).unwrap());
+            self.systems.push(system);
+            self.system_conditions.push(conditions);
+        }
+
+        // Move system set conditions out of the graph and into the schedule.
+        for &key in &self.set_ids {
+            let conditions = core::mem::take(graph.system_sets.get_conditions_mut(key).unwrap());
+            self.set_conditions.push(conditions);
+        }
+    }
+
+    /// Moves system-like data back into the graph from the schedule, so that
+    /// the schedule can be modified and reinitialize the executor.
+    pub fn backfill(mut self, graph: &mut ScheduleGraph) {
+        // Move systems and their conditions back to the graph.
+        for ((key, system), conditions) in self
+            .system_ids
+            .drain(..)
+            .zip(self.systems.drain(..))
+            .zip(self.system_conditions.drain(..))
+        {
+            if let Some(node) = graph.systems.node_mut(key) {
+                node.inner = Some(system);
+            }
+
+            if let Some(node_conditions) = graph.systems.get_conditions_mut(key) {
+                *node_conditions = conditions;
+            }
+        }
+
+        // Move system set conditions back to the graph.
+        for (key, conditions) in self.set_ids.drain(..).zip(self.set_conditions.drain(..)) {
+            if let Some(node_conditions) = graph.system_sets.get_conditions_mut(key) {
+                *node_conditions = conditions;
+            }
         }
     }
 }
