@@ -25,7 +25,10 @@ use thiserror::Error;
 #[cfg(feature = "trace")]
 use tracing::info_span;
 
-use crate::{change_detection::CheckChangeTicks, system::System};
+use crate::{
+    change_detection::CheckChangeTicks, schedule::passes::AutoInsertApplyDeferredPass,
+    system::System,
+};
 use crate::{
     component::{ComponentId, Components},
     prelude::Component,
@@ -217,16 +220,12 @@ impl Schedules {
     /// However, sometimes two independent plugins `A` and `B` are reported as ambiguous, which you
     /// can only suppress as the consumer of both.
     #[track_caller]
-    pub fn ignore_ambiguity<M1, M2, S1, S2>(
+    pub fn ignore_ambiguity<M1, M2>(
         &mut self,
         schedule: impl ScheduleLabel,
-        a: S1,
-        b: S2,
-    ) -> &mut Self
-    where
-        S1: IntoSystemSet<M1>,
-        S2: IntoSystemSet<M2>,
-    {
+        a: impl IntoSystemSet<M1>,
+        b: impl IntoSystemSet<M2>,
+    ) -> &mut Self {
         self.entry(schedule).ignore_ambiguity(a, b);
 
         self
@@ -347,7 +346,7 @@ pub struct Schedule {
     label: InternedScheduleLabel,
     graph: ScheduleGraph,
     executor: Box<dyn SystemExecutor>,
-    warnings: Vec<ScheduleBuildWarning>,
+    warnings: Option<Box<[ScheduleBuildWarning]>>,
 }
 
 #[derive(ScheduleLabel, Hash, PartialEq, Eq, Debug, Clone)]
@@ -370,7 +369,7 @@ impl Schedule {
             label: label.intern(),
             graph: ScheduleGraph::new(),
             executor: make_executor(ExecutorKind::default()),
-            warnings: Vec::new(),
+            warnings: None,
         };
         // Call `set_build_settings` to add any default build passes
         this.set_build_settings(Default::default());
@@ -421,30 +420,19 @@ impl Schedule {
         world: &mut World,
         policy: ScheduleCleanupPolicy,
     ) -> Result<usize, ScheduleError> {
-        if self.graph.changed {
-            self.initialize(world)?;
-        }
+        self.initialize(world)?;
         self.graph.remove_systems_in_set(set, policy)
     }
 
     /// Suppress warnings and errors that would result from systems in these sets having ambiguities
     /// (conflicting access but indeterminate order) with systems in `set`.
     #[track_caller]
-    pub fn ignore_ambiguity<M1, M2, S1, S2>(&mut self, a: S1, b: S2) -> &mut Self
-    where
-        S1: IntoSystemSet<M1>,
-        S2: IntoSystemSet<M2>,
-    {
-        let a = a.into_system_set();
-        let b = b.into_system_set();
-
-        let a_id = self.graph.system_sets.get_key_or_insert(a.intern());
-        let b_id = self.graph.system_sets.get_key_or_insert(b.intern());
-
-        self.graph
-            .ambiguous_with
-            .add_edge(NodeId::Set(a_id), NodeId::Set(b_id));
-
+    pub fn ignore_ambiguity<M1, M2>(
+        &mut self,
+        a: impl IntoSystemSet<M1>,
+        b: impl IntoSystemSet<M2>,
+    ) -> &mut Self {
+        self.graph.ignore_ambiguity(a, b);
         self
     }
 
@@ -454,19 +442,19 @@ impl Schedule {
         &mut self,
         sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
     ) -> &mut Self {
-        self.graph.configure_sets(sets);
+        self.graph.process_configs(sets.into_configs(), false);
         self
     }
 
     /// Add a custom build pass to the schedule.
     pub fn add_build_pass<T: ScheduleBuildPass>(&mut self, pass: T) -> &mut Self {
-        self.graph.passes.insert(TypeId::of::<T>(), Box::new(pass));
+        self.graph.add_build_pass(pass);
         self
     }
 
     /// Remove a custom build pass.
     pub fn remove_build_pass<T: ScheduleBuildPass>(&mut self) {
-        self.graph.passes.shift_remove(&TypeId::of::<T>());
+        self.graph.remove_build_pass::<T>();
     }
 
     /// Changes miscellaneous build settings.
@@ -477,24 +465,13 @@ impl Schedule {
     /// Generally this method should be used before adding systems or set configurations to the schedule,
     /// not after.
     pub fn set_build_settings(&mut self, settings: ScheduleBuildSettings) -> &mut Self {
-        if settings.auto_insert_apply_deferred {
-            if !self
-                .graph
-                .passes
-                .contains_key(&TypeId::of::<passes::AutoInsertApplyDeferredPass>())
-            {
-                self.add_build_pass(passes::AutoInsertApplyDeferredPass::default());
-            }
-        } else {
-            self.remove_build_pass::<passes::AutoInsertApplyDeferredPass>();
-        }
-        self.graph.settings = settings;
+        self.graph.set_build_settings(settings);
         self
     }
 
-    /// Returns the schedule's current `ScheduleBuildSettings`.
-    pub fn get_build_settings(&self) -> ScheduleBuildSettings {
-        self.graph.settings.clone()
+    /// Returns the schedule's current [`ScheduleBuildSettings`].
+    pub fn get_build_settings(&self) -> &ScheduleBuildSettings {
+        self.graph.get_build_settings()
     }
 
     /// Returns the schedule's current execution strategy.
@@ -572,7 +549,7 @@ impl Schedule {
                     warning.to_string(self.graph(), world)
                 );
             }
-            self.warnings = warnings;
+            self.warnings = Some(warnings.into_boxed_slice());
 
             self.executor
                 .initialize(&mut self.graph, &flat_dependency, &hierarchy_analysis);
@@ -650,7 +627,7 @@ impl Schedule {
     /// Returns warnings that were generated during the last call to
     /// [`Schedule::initialize`].
     pub fn warnings(&self) -> &[ScheduleBuildWarning] {
-        &self.warnings
+        self.warnings.as_deref().unwrap_or(&[])
     }
 }
 
@@ -721,6 +698,63 @@ impl ScheduleGraph {
     /// Must be called after [`ScheduleGraph::build_schedule`] to be non-empty.
     pub fn conflicting_systems(&self) -> &ConflictingSystems {
         &self.conflicting_systems
+    }
+
+    /// Suppress warnings and errors that would result from systems in these sets
+    /// having ambiguities (conflicting access but indeterminate order) with
+    /// systems in `set`.
+    #[track_caller]
+    pub fn ignore_ambiguity<M1, M2>(
+        &mut self,
+        a: impl IntoSystemSet<M1>,
+        b: impl IntoSystemSet<M2>,
+    ) {
+        let a = a.into_system_set();
+        let b = b.into_system_set();
+
+        let a_id = self.system_sets.get_key_or_insert(a.intern());
+        let b_id = self.system_sets.get_key_or_insert(b.intern());
+
+        self.ambiguous_with
+            .add_edge(NodeId::Set(a_id), NodeId::Set(b_id));
+    }
+
+    /// Add a custom build pass to the schedule.
+    pub fn add_build_pass<T: ScheduleBuildPass>(&mut self, pass: T) {
+        self.passes.insert(TypeId::of::<T>(), Box::new(pass));
+    }
+
+    /// Remove a custom build pass.
+    pub fn remove_build_pass<T: ScheduleBuildPass>(&mut self) {
+        self.passes.shift_remove(&TypeId::of::<T>());
+    }
+
+    /// Returns `true` if the schedule contains a build pass of type `T`.
+    pub fn contains_build_pass<T: ScheduleBuildPass>(&self) -> bool {
+        self.passes.contains_key(&TypeId::of::<T>())
+    }
+
+    /// Changes miscellaneous build settings.
+    ///
+    /// If [`settings.auto_insert_apply_deferred`][ScheduleBuildSettings::auto_insert_apply_deferred]
+    /// is `false`, this clears `*_ignore_deferred` edge settings configured so far.
+    ///
+    /// Generally this method should be used before adding systems or set
+    /// configurations to the schedule, not after.
+    pub fn set_build_settings(&mut self, settings: ScheduleBuildSettings) {
+        if settings.auto_insert_apply_deferred {
+            if !self.contains_build_pass::<AutoInsertApplyDeferredPass>() {
+                self.add_build_pass(AutoInsertApplyDeferredPass::default());
+            }
+        } else {
+            self.remove_build_pass::<AutoInsertApplyDeferredPass>();
+        }
+        self.settings = settings;
+    }
+
+    /// Returns the schedule's current [`ScheduleBuildSettings`].
+    pub fn get_build_settings(&self) -> &ScheduleBuildSettings {
+        &self.settings
     }
 
     fn process_config<T: Schedulable>(
@@ -860,11 +894,6 @@ impl ScheduleGraph {
         self.update_graphs(NodeId::System(key), config.metadata);
 
         key
-    }
-
-    #[track_caller]
-    fn configure_sets<M>(&mut self, sets: impl IntoScheduleConfigs<InternedSystemSet, M>) {
-        self.process_configs(sets.into_configs(), false);
     }
 
     /// Add a single `ScheduleConfig` to the graph, including its dependencies and conditions.
@@ -1501,7 +1530,7 @@ mod tests {
         schedule.run(&mut world);
 
         // inserted a sync point
-        assert_eq!(schedule.executable().systems.len(), 3);
+        assert_eq!(schedule.systems_len(), 3);
     }
 
     #[test]
@@ -1519,7 +1548,7 @@ mod tests {
         schedule.run(&mut world);
 
         // No sync point was inserted, since we can reuse the explicit sync point.
-        assert_eq!(schedule.executable().systems.len(), 5);
+        assert_eq!(schedule.systems_len(), 5);
     }
 
     #[test]
@@ -1537,7 +1566,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable().systems.len(), 6);
+        assert_eq!(schedule.systems_len(), 6);
     }
 
     #[test]
@@ -1555,7 +1584,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable().systems.len(), 6);
+        assert_eq!(schedule.systems_len(), 6);
     }
 
     #[test]
@@ -1577,7 +1606,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable().systems.len(), 6);
+        assert_eq!(schedule.systems_len(), 6);
     }
 
     #[test]
@@ -1603,7 +1632,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.executable().systems.len(), 6);
+        assert_eq!(schedule.systems_len(), 6);
     }
 
     #[test]
@@ -1624,7 +1653,7 @@ mod tests {
         schedule.run(&mut world);
 
         // inserted sync points
-        assert_eq!(schedule.executable().systems.len(), 4);
+        assert_eq!(schedule.systems_len(), 4);
 
         // merges sync points on rebuild
         schedule.add_systems(((
@@ -1637,7 +1666,7 @@ mod tests {
             .chain(),));
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable().systems.len(), 7);
+        assert_eq!(schedule.systems_len(), 7);
     }
 
     #[test]
@@ -1655,7 +1684,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable().systems.len(), 5);
+        assert_eq!(schedule.systems_len(), 5);
     }
 
     #[test]
@@ -1679,7 +1708,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable().systems.len(), 6); // 5 systems + 1 sync point
+        assert_eq!(schedule.systems_len(), 6); // 5 systems + 1 sync point
     }
 
     #[test]
@@ -1712,7 +1741,7 @@ mod tests {
 
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable().systems.len(), 4); // 3 systems + 1 sync point
+        assert_eq!(schedule.systems_len(), 4); // 3 systems + 1 sync point
     }
 
     #[test]
@@ -1732,7 +1761,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.executable().systems.len(), 2);
+        assert_eq!(schedule.systems_len(), 2);
     }
 
     mod no_sync_edges {
@@ -1759,7 +1788,7 @@ mod tests {
 
             schedule.run(&mut world);
 
-            assert_eq!(schedule.executable().systems.len(), 2);
+            assert_eq!(schedule.systems_len(), 2);
         }
 
         #[test]
@@ -1844,7 +1873,7 @@ mod tests {
 
             schedule.run(&mut world);
 
-            assert_eq!(schedule.executable().systems.len(), expected_num_systems);
+            assert_eq!(schedule.systems_len(), expected_num_systems);
         }
 
         #[test]
