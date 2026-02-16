@@ -4,7 +4,8 @@ use crate::{
     change_detection::{CheckChangeTicks, Tick},
     error::Result,
     query::FilteredAccessSet,
-    system::{input::SystemIn, BoxedSystem, RunSystemError, System, SystemInput},
+    schedule::SystemArc,
+    system::{input::SystemIn, RunSystemError, System, SystemInput},
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, FromWorld, World},
 };
 
@@ -212,4 +213,4 @@ where
 }
 
 /// Type alias for a `BoxedSystem` that a `Schedule` can store.
-pub type ScheduleSystem = BoxedSystem<(), ()>;
+pub type ScheduleSystem = SystemArc<dyn System<In = (), Out = ()>>;

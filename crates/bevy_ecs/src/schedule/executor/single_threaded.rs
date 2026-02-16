@@ -17,7 +17,7 @@ use crate::{
         is_apply_deferred, ConditionWithAccess, ExecutorKind, NodeId, ScheduleGraph,
         ScheduleNotInitialized, SystemExecutor, SystemKey, SystemSchedule,
     },
-    system::{RunSystemError, ScheduleSystem, System},
+    system::{RunSystemError, ScheduleSystem},
     world::World,
 };
 
@@ -48,20 +48,17 @@ impl SystemExecutor for SingleThreadedExecutor {
         ExecutorKind::SingleThreaded
     }
 
-    fn deinitialize(&mut self, graph: &mut ScheduleGraph) {
-        if let Some(executable) = self.executable.take() {
-            executable.backfill(graph);
-        }
+    fn is_initialized(&self) -> bool {
+        self.executable.is_some()
     }
 
     fn initialize(
         &mut self,
-        graph: &mut ScheduleGraph,
+        graph: &ScheduleGraph,
         flat_dependency: &Dag<SystemKey>,
         hierarchy_analysis: &DagAnalysis<NodeId>,
     ) {
-        let (mut executable, _) = SystemSchedule::new(graph, flat_dependency, hierarchy_analysis);
-        executable.fill(graph);
+        let (executable, _) = SystemSchedule::new(graph, flat_dependency, hierarchy_analysis);
 
         // pre-allocate space
         let sys_count = executable.system_ids.len();
@@ -99,7 +96,7 @@ impl SystemExecutor for SingleThreadedExecutor {
             let system = &mut executable.systems[system_index].system;
 
             #[cfg(feature = "trace")]
-            let name = system.name();
+            let name = system.lock().name();
             #[cfg(feature = "trace")]
             let should_run_span = info_span!("check_conditions", name = name.to_string()).entered();
 
@@ -153,10 +150,11 @@ impl SystemExecutor for SingleThreadedExecutor {
                 continue;
             }
 
-            if is_apply_deferred(&**system) {
+            if is_apply_deferred(&*system.lock()) {
                 for system_index in self.unapplied_systems.ones() {
                     executable.systems[system_index]
                         .system
+                        .lock()
                         .apply_deferred(world);
                 }
                 self.unapplied_systems.clear();
@@ -165,13 +163,16 @@ impl SystemExecutor for SingleThreadedExecutor {
 
             let f = AssertUnwindSafe(|| {
                 if let Err(RunSystemError::Failed(err)) =
-                    __rust_begin_short_backtrace::run_without_applying_deferred(system, world)
+                    __rust_begin_short_backtrace::run_without_applying_deferred(
+                        &mut *system.lock(),
+                        world,
+                    )
                 {
                     error_handler(
                         err,
                         ErrorContext::System {
-                            name: system.name(),
-                            last_run: system.get_last_run(),
+                            name: system.lock().name(),
+                            last_run: system.lock().get_last_run(),
                         },
                     );
                 }
@@ -181,7 +182,7 @@ impl SystemExecutor for SingleThreadedExecutor {
             #[expect(clippy::print_stderr, reason = "Allowed behind `std` feature gate.")]
             {
                 if let Err(payload) = std::panic::catch_unwind(f) {
-                    eprintln!("Encountered a panic in system `{}`!", system.name());
+                    eprintln!("Encountered a panic in system `{}`!", system.lock().name());
                     std::panic::resume_unwind(payload);
                 }
             }
@@ -209,20 +210,21 @@ impl SystemExecutor for SingleThreadedExecutor {
     fn check_change_ticks(&mut self, check: CheckChangeTicks) {
         if let Some(executable) = &mut self.executable {
             for system in &mut executable.systems {
-                if !is_apply_deferred(system) {
+                let mut system = system.lock();
+                if !is_apply_deferred(&*system) {
                     system.check_change_tick(check);
                 }
             }
 
             for conditions in &mut executable.system_conditions {
                 for condition in conditions {
-                    condition.check_change_tick(check);
+                    condition.lock().check_change_tick(check);
                 }
             }
 
             for conditions in &mut executable.set_conditions {
                 for condition in conditions {
-                    condition.check_change_tick(check);
+                    condition.lock().check_change_tick(check);
                 }
             }
         }
@@ -233,14 +235,11 @@ impl SystemExecutor for SingleThreadedExecutor {
             for system_index in self.unapplied_systems.ones() {
                 executable.systems[system_index]
                     .system
+                    .lock()
                     .apply_deferred(world);
             }
             self.unapplied_systems.clear();
         }
-    }
-
-    fn executable(&self) -> Option<&SystemSchedule> {
-        self.executable.as_ref()
     }
 }
 
@@ -278,12 +277,13 @@ fn evaluate_and_fold_conditions(
     )]
     conditions
         .iter_mut()
-        .map(|ConditionWithAccess { condition, .. }| {
+        .map(|condition| {
+            let mut condition = condition.lock();
             #[cfg(feature = "hotpatching")]
             if hotpatch_tick.is_newer_than(condition.get_last_run(), world.change_tick()) {
                 condition.refresh_hotpatch();
             }
-            __rust_begin_short_backtrace::readonly_run(&mut **condition, world).unwrap_or_else(
+            __rust_begin_short_backtrace::readonly_run(&mut *condition, world).unwrap_or_else(
                 |err| {
                     if let RunSystemError::Failed(err) = err {
                         error_handler(
@@ -291,7 +291,7 @@ fn evaluate_and_fold_conditions(
                             ErrorContext::RunCondition {
                                 name: condition.name(),
                                 last_run: condition.get_last_run(),
-                                system: for_system.name(),
+                                system: for_system.lock().name(),
                                 on_set,
                             },
                         );

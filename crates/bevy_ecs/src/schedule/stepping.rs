@@ -661,7 +661,7 @@ impl ScheduleState {
         // PERF: If we add a way to efficiently query schedule systems by their TypeId, we could remove the full
         // system scan here
         for (key, system) in schedule.systems().unwrap() {
-            let behavior = self.behavior_updates.get(&system.type_id());
+            let behavior = self.behavior_updates.get(&system.lock().type_id());
             match behavior {
                 None => continue,
                 Some(None) => {
@@ -688,8 +688,16 @@ impl ScheduleState {
 
         // if our NodeId list hasn't been populated, copy it over from the
         // schedule
-        if self.node_ids.len() != schedule.systems_len() {
-            self.node_ids.clone_from(&schedule.executable().system_ids);
+        if self.node_ids.len() != schedule.graph().systems.len() {
+            self.node_ids.clear();
+            self.node_ids.extend_from_slice(
+                schedule
+                    .graph()
+                    .flat_dependency()
+                    .ok()
+                    .and_then(|fd| fd.get_toposort())
+                    .unwrap_or(&[]),
+            );
         }
 
         // Now that we have the schedule, apply any pending system behavior
@@ -712,7 +720,7 @@ impl ScheduleState {
             }
         }
 
-        let mut skip = FixedBitSet::with_capacity(schedule.systems_len());
+        let mut skip = FixedBitSet::with_capacity(schedule.graph().systems.len());
         let mut pos = start;
 
         for (i, (key, _system)) in schedule.systems().unwrap().enumerate() {
@@ -728,7 +736,7 @@ impl ScheduleState {
                 pos,
                 action,
                 behavior,
-                _system.name()
+                _system.lock().name()
             );
 
             match (action, behavior) {
@@ -809,7 +817,7 @@ impl ScheduleState {
 
         // output is the skip list, and the index of the next system to run in
         // this schedule.
-        if pos >= schedule.systems_len() {
+        if pos >= schedule.graph().systems.len() {
             (skip, None)
         } else {
             (skip, Some(pos))

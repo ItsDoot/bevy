@@ -1,5 +1,4 @@
 use alloc::{boxed::Box, vec::Vec};
-use bevy_platform::cell::SyncUnsafeCell;
 use bevy_platform::sync::Arc;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool, ThreadExecutor};
 use concurrent_queue::ConcurrentQueue;
@@ -25,7 +24,7 @@ use crate::{
         is_apply_deferred, ConditionWithAccess, ExecutorKind, NodeId, ScheduleGraph,
         ScheduleNotInitialized, SystemExecutor, SystemKey, SystemSchedule, SystemWithAccess,
     },
-    system::{RunSystemError, ScheduleSystem, System},
+    system::{RunSystemError, ScheduleSystem},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 #[cfg(feature = "hotpatching")]
@@ -38,16 +37,16 @@ struct Environment<'env> {
     system_completion: &'env ConcurrentQueue<SystemResult>,
     panic_payload: &'env Mutex<Option<Box<dyn Any + Send>>>,
     state: &'env Mutex<ExecutorState>,
-    systems: &'env [SyncUnsafeCell<SystemWithAccess>],
-    conditions: SyncUnsafeCell<Conditions<'env>>,
+    systems: &'env [SystemWithAccess],
+    conditions: Conditions<'env>,
     world_cell: UnsafeWorldCell<'env>,
     #[cfg(feature = "trace")]
     executor_span: &'env Span,
 }
 
 struct Conditions<'a> {
-    system_conditions: &'a mut [Vec<ConditionWithAccess>],
-    set_conditions: &'a mut [Vec<ConditionWithAccess>],
+    system_conditions: &'a [Vec<ConditionWithAccess>],
+    set_conditions: &'a [Vec<ConditionWithAccess>],
     sets_with_conditions_of_systems: &'a [FixedBitSet],
     systems_in_sets_with_conditions: &'a [FixedBitSet],
 }
@@ -186,15 +185,13 @@ impl SystemExecutor for MultiThreadedExecutor {
         ExecutorKind::MultiThreaded
     }
 
-    fn deinitialize(&mut self, graph: &mut ScheduleGraph) {
-        if let Some((executable, _)) = self.executable.take() {
-            executable.backfill(graph);
-        }
+    fn is_initialized(&self) -> bool {
+        self.executable.is_some()
     }
 
     fn initialize(
         &mut self,
-        graph: &mut ScheduleGraph,
+        graph: &ScheduleGraph,
         flat_dependency: &Dag<SystemKey>,
         hierarchy_analysis: &DagAnalysis<NodeId>,
     ) {
@@ -219,12 +216,13 @@ impl SystemExecutor for MultiThreadedExecutor {
 
         state.system_task_metadata = Vec::with_capacity(sys_count);
         for index in 0..sys_count {
+            let system = executable.systems[index].lock();
             state.system_task_metadata.push(SystemTaskMetadata {
                 conflicting_systems: FixedBitSet::with_capacity(sys_count),
                 condition_conflicting_systems: FixedBitSet::with_capacity(sys_count),
                 dependents: executable_mt.system_dependents[index].clone(),
-                is_send: executable.systems[index].system.is_send(),
-                is_exclusive: executable.systems[index].system.is_exclusive(),
+                is_send: system.is_send(),
+                is_exclusive: system.is_exclusive(),
             });
             if executable_mt.system_dependencies[index] == 0 {
                 self.starting_systems.insert(index);
@@ -329,14 +327,13 @@ impl SystemExecutor for MultiThreadedExecutor {
                 system_completion: &self.system_completion,
                 panic_payload: &self.panic_payload,
                 state: &self.state,
-                systems: SyncUnsafeCell::from_mut(executable.systems.as_mut_slice())
-                    .as_slice_of_cells(),
-                conditions: SyncUnsafeCell::new(Conditions {
-                    system_conditions: &mut executable.system_conditions,
-                    set_conditions: &mut executable.set_conditions,
+                systems: executable.systems.as_slice(),
+                conditions: Conditions {
+                    system_conditions: &executable.system_conditions,
+                    set_conditions: &executable.set_conditions,
                     sets_with_conditions_of_systems: &executable.sets_with_conditions_of_systems,
                     systems_in_sets_with_conditions: &executable.systems_in_sets_with_conditions,
-                }),
+                },
                 world_cell: world.as_unsafe_world_cell(),
                 #[cfg(feature = "trace")]
                 executor_span: &self.executor_span,
@@ -363,8 +360,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         if self.apply_final_deferred {
             // Do one final apply buffers after all systems have completed
             // Commands should be applied while on the scope's thread, not the executor's thread
-            let systems =
-                SyncUnsafeCell::from_mut(executable.systems.as_mut_slice()).as_slice_of_cells();
+            let systems = executable.systems.as_slice();
             let res = apply_deferred(&state.unapplied_systems, systems, world);
             if let Err(payload) = res {
                 let panic_payload = self.panic_payload.get_mut().unwrap();
@@ -394,20 +390,21 @@ impl SystemExecutor for MultiThreadedExecutor {
     fn check_change_ticks(&mut self, check: CheckChangeTicks) {
         if let Some((executable, _)) = &mut self.executable {
             for system in &mut executable.systems {
-                if !is_apply_deferred(system) {
+                let mut system = system.lock();
+                if !is_apply_deferred(&*system) {
                     system.check_change_tick(check);
                 }
             }
 
             for conditions in &mut executable.system_conditions {
                 for condition in conditions {
-                    condition.check_change_tick(check);
+                    condition.lock().check_change_tick(check);
                 }
             }
 
             for conditions in &mut executable.set_conditions {
                 for condition in conditions {
-                    condition.check_change_tick(check);
+                    condition.lock().check_change_tick(check);
                 }
             }
         }
@@ -416,13 +413,9 @@ impl SystemExecutor for MultiThreadedExecutor {
     fn apply_deferred(&mut self, world: &mut World) {
         if let Some((executable, _)) = &mut self.executable {
             for system in &mut executable.systems {
-                system.apply_deferred(world);
+                system.lock().apply_deferred(world);
             }
         }
-    }
-
-    fn executable(&self) -> Option<&SystemSchedule> {
-        self.executable.as_ref().map(|(executable, _)| executable)
     }
 }
 
@@ -442,7 +435,7 @@ impl<'scope, 'env: 'scope> Context<'scope, 'env> {
             #[cfg(feature = "std")]
             #[expect(clippy::print_stderr, reason = "Allowed behind `std` feature gate.")]
             {
-                eprintln!("Encountered a panic in system `{}`!", system.name());
+                eprintln!("Encountered a panic in system `{}`!", system.lock().name());
             }
             // set the payload to propagate the error
             {
@@ -453,16 +446,9 @@ impl<'scope, 'env: 'scope> Context<'scope, 'env> {
         self.tick_executor();
     }
 
-    #[expect(
-        clippy::mut_from_ref,
-        reason = "Field is only accessed here and is guarded by lock with a documented safety comment"
-    )]
-    fn try_lock<'a>(&'a self) -> Option<(&'a mut Conditions<'env>, MutexGuard<'a, ExecutorState>)> {
+    fn try_lock<'a>(&'a self) -> Option<(&'a Conditions<'env>, MutexGuard<'a, ExecutorState>)> {
         let guard = self.environment.state.try_lock().ok()?;
-        // SAFETY: This is an exclusive access as no other location fetches conditions mutably, and
-        // is synchronized by the lock on the executor state.
-        let conditions = unsafe { &mut *self.environment.conditions.get() };
-        Some((conditions, guard))
+        Some((&self.environment.conditions, guard))
     }
 
     fn tick_executor(&self) {
@@ -522,7 +508,7 @@ impl ExecutorState {
         }
     }
 
-    fn tick(&mut self, context: &Context, conditions: &mut Conditions) {
+    fn tick(&mut self, context: &Context, conditions: &Conditions) {
         #[cfg(feature = "trace")]
         let _span = context.environment.executor_span.enter();
 
@@ -543,7 +529,7 @@ impl ExecutorState {
     ///   have been mutably borrowed (such as the systems currently running).
     /// - `world_cell` must have permission to access all world data (not counting
     ///   any world data that is claimed by systems currently running on this executor).
-    unsafe fn spawn_system_tasks(&mut self, context: &Context, conditions: &mut Conditions) {
+    unsafe fn spawn_system_tasks(&mut self, context: &Context, conditions: &Conditions) {
         if self.exclusive_running {
             return;
         }
@@ -578,10 +564,7 @@ impl ExecutorState {
 
             for system_index in ready_systems.ones() {
                 debug_assert!(!self.running_systems.contains(system_index));
-                // SAFETY: Caller assured that these systems are not running.
-                // Therefore, no other reference to this system exists and there is no aliasing.
-                let system =
-                    &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
+                let system = &context.environment.systems[system_index].system;
 
                 #[cfg(feature = "hotpatching")]
                 if hotpatch_tick.is_newer_than(
@@ -646,7 +629,7 @@ impl ExecutorState {
         self.ready_systems_copy = ready_systems;
     }
 
-    fn can_run(&mut self, system_index: usize, conditions: &mut Conditions) -> bool {
+    fn can_run(&mut self, system_index: usize, conditions: &Conditions) -> bool {
         let system_meta = &self.system_task_metadata[system_index];
         if system_meta.is_exclusive && self.num_running_systems > 0 {
             return false;
@@ -690,8 +673,8 @@ impl ExecutorState {
     unsafe fn should_run(
         &mut self,
         system_index: usize,
-        system: &mut ScheduleSystem,
-        conditions: &mut Conditions,
+        system: &ScheduleSystem,
+        conditions: &Conditions,
         world: UnsafeWorldCell,
         error_handler: ErrorHandler,
     ) -> bool {
@@ -708,7 +691,7 @@ impl ExecutorState {
             //   required by the conditions.
             let set_conditions_met = unsafe {
                 evaluate_and_fold_conditions(
-                    &mut conditions.set_conditions[set_idx],
+                    &conditions.set_conditions[set_idx],
                     world,
                     error_handler,
                     system,
@@ -731,7 +714,7 @@ impl ExecutorState {
         //   required by the conditions.
         let system_conditions_met = unsafe {
             evaluate_and_fold_conditions(
-                &mut conditions.system_conditions[system_index],
+                &conditions.system_conditions[system_index],
                 world,
                 error_handler,
                 system,
@@ -746,6 +729,7 @@ impl ExecutorState {
         should_run &= system_conditions_met;
 
         if should_run {
+            let mut system = system.lock();
             // SAFETY:
             // - The caller ensures that `world` has permission to read any data
             //   required by the system.
@@ -780,8 +764,7 @@ impl ExecutorState {
     /// - `world` must have permission to access the world data
     ///   used by the specified system.
     unsafe fn spawn_system_task(&mut self, context: &Context, system_index: usize) {
-        // SAFETY: this system is not running, no other reference exists
-        let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
+        let system = &context.environment.systems[system_index].system;
         // Move the full context object into the new future.
         let context = *context;
 
@@ -789,6 +772,7 @@ impl ExecutorState {
 
         let task = async move {
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let mut system = system.lock();
                 // SAFETY:
                 // - The caller ensures that we have permission to
                 // access the world data used by the system.
@@ -796,7 +780,7 @@ impl ExecutorState {
                 unsafe {
                     if let Err(RunSystemError::Failed(err)) =
                         __rust_begin_short_backtrace::run_unsafe(
-                            system,
+                            &mut *system,
                             context.environment.world_cell,
                         )
                     {
@@ -824,12 +808,11 @@ impl ExecutorState {
     /// # Safety
     /// Caller must ensure no systems are currently borrowed.
     unsafe fn spawn_exclusive_system_task(&mut self, context: &Context, system_index: usize) {
-        // SAFETY: this system is not running, no other reference exists
-        let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
+        let system = &context.environment.systems[system_index].system;
         // Move the full context object into the new future.
         let context = *context;
 
-        if is_apply_deferred(&**system) {
+        if is_apply_deferred(&*system.lock()) {
             // TODO: avoid allocation
             let unapplied_systems = self.unapplied_systems.clone();
             self.unapplied_systems.clear();
@@ -848,8 +831,9 @@ impl ExecutorState {
                 // that no other systems currently have access to the world.
                 let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    let mut system = system.lock();
                     if let Err(RunSystemError::Failed(err)) =
-                        __rust_begin_short_backtrace::run(system, world)
+                        __rust_begin_short_backtrace::run(&mut *system, world)
                     {
                         (context.error_handler)(
                             err,
@@ -909,14 +893,13 @@ impl ExecutorState {
 
 fn apply_deferred(
     unapplied_systems: &FixedBitSet,
-    systems: &[SyncUnsafeCell<SystemWithAccess>],
+    systems: &[SystemWithAccess],
     world: &mut World,
 ) -> Result<(), Box<dyn Any + Send>> {
     for system_index in unapplied_systems.ones() {
-        // SAFETY: none of these systems are running, no other references exist
-        let system = &mut unsafe { &mut *systems[system_index].get() }.system;
+        let system = &systems[system_index].system;
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            system.apply_deferred(world);
+            system.lock().apply_deferred(world);
         }));
         if let Err(payload) = res {
             #[cfg(feature = "std")]
@@ -924,7 +907,7 @@ fn apply_deferred(
             {
                 eprintln!(
                     "Encountered a panic when applying buffers for system `{}`!",
-                    system.name()
+                    system.lock().name()
                 );
             }
             return Err(payload);
@@ -937,7 +920,7 @@ fn apply_deferred(
 /// - `world` must have permission to read any world data
 ///   required by `conditions`.
 unsafe fn evaluate_and_fold_conditions(
-    conditions: &mut [ConditionWithAccess],
+    conditions: &[ConditionWithAccess],
     world: UnsafeWorldCell,
     error_handler: ErrorHandler,
     for_system: &ScheduleSystem,
@@ -948,8 +931,9 @@ unsafe fn evaluate_and_fold_conditions(
         reason = "Short-circuiting here would prevent conditions from mutating their own state as needed."
     )]
     conditions
-        .iter_mut()
-        .map(|ConditionWithAccess { condition, .. }| {
+        .iter()
+        .map(|condition| {
+            let mut condition = condition.lock();
             // SAFETY:
             // - The caller ensures that `world` has permission to read any data
             //   required by the condition.
@@ -960,7 +944,7 @@ unsafe fn evaluate_and_fold_conditions(
                     // - The caller ensures that `world` has permission to read any data
                     //   required by the condition.
                     unsafe {
-                        __rust_begin_short_backtrace::readonly_run_unsafe(&mut **condition, world)
+                        __rust_begin_short_backtrace::readonly_run_unsafe(&mut *condition, world)
                     }
                 })
                 .unwrap_or_else(|err| {
@@ -970,7 +954,7 @@ unsafe fn evaluate_and_fold_conditions(
                             ErrorContext::RunCondition {
                                 name: condition.name(),
                                 last_run: condition.get_last_run(),
-                                system: for_system.name(),
+                                system: for_system.lock().name(),
                                 on_set,
                             },
                         );

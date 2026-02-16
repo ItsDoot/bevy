@@ -32,15 +32,11 @@ use crate::{
 pub(super) trait SystemExecutor: Send + Sync {
     fn kind(&self) -> ExecutorKind;
 
-    fn is_initialized(&self) -> bool {
-        self.executable().is_some()
-    }
-
-    fn deinitialize(&mut self, graph: &mut ScheduleGraph);
+    fn is_initialized(&self) -> bool;
 
     fn initialize(
         &mut self,
-        graph: &mut ScheduleGraph,
+        graph: &ScheduleGraph,
         flat_dependency: &Dag<SystemKey>,
         hierarchy_analysis: &DagAnalysis<NodeId>,
     );
@@ -57,8 +53,6 @@ pub(super) trait SystemExecutor: Send + Sync {
     fn check_change_ticks(&mut self, check: CheckChangeTicks);
 
     fn apply_deferred(&mut self, world: &mut World);
-
-    fn executable(&self) -> Option<&SystemSchedule>;
 }
 
 /// Specifies how a [`Schedule`](super::Schedule) will be run.
@@ -194,11 +188,31 @@ impl SystemSchedule {
             }
         }
 
+        let (systems, system_conditions) = dg_system_ids
+            .iter()
+            .map(|&key| {
+                let system = graph.systems[key].clone();
+                let conditions = graph.systems.get_conditions(key).unwrap_or(&[]).to_vec();
+                (system, conditions)
+            })
+            .unzip();
+
+        let set_conditions = hg_set_ids
+            .iter()
+            .map(|&key| {
+                graph
+                    .system_sets
+                    .get_conditions(key)
+                    .unwrap_or(&[])
+                    .to_vec()
+            })
+            .collect();
+
         (
             Self {
-                systems: Vec::with_capacity(sys_count),
-                system_conditions: Vec::with_capacity(sys_count),
-                set_conditions: Vec::with_capacity(set_with_conditions_count),
+                systems,
+                system_conditions,
+                set_conditions,
                 system_ids: dg_system_ids,
                 set_ids: hg_set_ids,
                 sets_with_conditions_of_systems,
@@ -206,51 +220,6 @@ impl SystemSchedule {
             },
             dg_system_idx_map,
         )
-    }
-
-    /// Moves system-like data out of the graph and into the schedule, so that
-    /// the executor can run systems from the schedule.
-    pub fn fill(&mut self, graph: &mut ScheduleGraph) {
-        // Move systems and their conditions out of the graph and into the schedule.
-        for &key in &self.system_ids {
-            let system = graph.systems.node_mut(key).unwrap().inner.take().unwrap();
-            let conditions = core::mem::take(graph.systems.get_conditions_mut(key).unwrap());
-            self.systems.push(system);
-            self.system_conditions.push(conditions);
-        }
-
-        // Move system set conditions out of the graph and into the schedule.
-        for &key in &self.set_ids {
-            let conditions = core::mem::take(graph.system_sets.get_conditions_mut(key).unwrap());
-            self.set_conditions.push(conditions);
-        }
-    }
-
-    /// Moves system-like data back into the graph from the schedule, so that
-    /// the schedule can be modified and reinitialize the executor.
-    pub fn backfill(mut self, graph: &mut ScheduleGraph) {
-        // Move systems and their conditions back to the graph.
-        for ((key, system), conditions) in self
-            .system_ids
-            .drain(..)
-            .zip(self.systems.drain(..))
-            .zip(self.system_conditions.drain(..))
-        {
-            if let Some(node) = graph.systems.node_mut(key) {
-                node.inner = Some(system);
-            }
-
-            if let Some(node_conditions) = graph.systems.get_conditions_mut(key) {
-                *node_conditions = conditions;
-            }
-        }
-
-        // Move system set conditions back to the graph.
-        for (key, conditions) in self.set_ids.drain(..).zip(self.set_conditions.drain(..)) {
-            if let Some(node_conditions) = graph.system_sets.get_conditions_mut(key) {
-                *node_conditions = conditions;
-            }
-        }
     }
 }
 
@@ -373,13 +342,13 @@ impl IntoSystemSet<()> for ApplyDeferred {
 mod __rust_begin_short_backtrace {
     use core::hint::black_box;
 
-    #[cfg(feature = "std")]
-    use crate::world::unsafe_world_cell::UnsafeWorldCell;
     use crate::{
         error::Result,
-        system::{ReadOnlySystem, RunSystemError, ScheduleSystem},
+        system::{ReadOnlySystem, RunSystemError},
         world::World,
     };
+    #[cfg(feature = "std")]
+    use crate::{system::System, world::unsafe_world_cell::UnsafeWorldCell};
 
     /// # Safety
     /// See `System::run_unsafe`.
@@ -387,7 +356,7 @@ mod __rust_begin_short_backtrace {
     #[cfg(feature = "std")]
     #[inline(never)]
     pub(super) unsafe fn run_unsafe(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: UnsafeWorldCell,
     ) -> Result<(), RunSystemError> {
         // SAFETY: Upheld by caller
@@ -414,7 +383,7 @@ mod __rust_begin_short_backtrace {
     #[cfg(feature = "std")]
     #[inline(never)]
     pub(super) fn run(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run((), world);
@@ -425,7 +394,7 @@ mod __rust_begin_short_backtrace {
 
     #[inline(never)]
     pub(super) fn run_without_applying_deferred(
-        system: &mut ScheduleSystem,
+        system: &mut dyn System<In = (), Out = ()>,
         world: &mut World,
     ) -> Result<(), RunSystemError> {
         let result = system.run_without_applying_deferred((), world);

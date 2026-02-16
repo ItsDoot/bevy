@@ -133,6 +133,7 @@ fn build_ui(
         };
 
         for (key, system) in systems {
+            let system = system.lock();
             // skip bevy default systems; we don't want to step those
             #[cfg(feature = "debug")]
             if system.name().as_string().starts_with("bevy") {

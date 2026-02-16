@@ -26,14 +26,11 @@ use thiserror::Error;
 use tracing::info_span;
 
 use crate::{
-    change_detection::CheckChangeTicks, schedule::passes::AutoInsertApplyDeferredPass,
-    system::System,
-};
-use crate::{
+    change_detection::CheckChangeTicks,
     component::{ComponentId, Components},
     prelude::Component,
     resource::Resource,
-    schedule::*,
+    schedule::{passes::AutoInsertApplyDeferredPass, *},
     system::ScheduleSystem,
     world::World,
 };
@@ -536,7 +533,6 @@ impl Schedule {
     /// Moves all systems and run conditions out of the [`ScheduleGraph`].
     pub fn initialize(&mut self, world: &mut World) -> Result<(), ScheduleBuildError> {
         if self.graph.changed || !self.executor.is_initialized() {
-            self.executor.deinitialize(&mut self.graph);
             self.graph.initialize(world);
 
             let (flat_dependency, hierarchy_analysis, warnings) =
@@ -552,7 +548,7 @@ impl Schedule {
             self.warnings = Some(warnings.into_boxed_slice());
 
             self.executor
-                .initialize(&mut self.graph, &flat_dependency, &hierarchy_analysis);
+                .initialize(&self.graph, &flat_dependency, &hierarchy_analysis);
         }
 
         Ok(())
@@ -566,13 +562,6 @@ impl Schedule {
     /// Returns a mutable reference to the [`ScheduleGraph`].
     pub fn graph_mut(&mut self) -> &mut ScheduleGraph {
         &mut self.graph
-    }
-
-    /// Returns the [`SystemSchedule`].
-    pub(crate) fn executable(&self) -> &SystemSchedule {
-        self.executor
-            .executable()
-            .unwrap_or(const { &SystemSchedule::empty() })
     }
 
     /// Iterates the change ticks of all systems in the schedule and clamps any older than
@@ -594,34 +583,23 @@ impl Schedule {
         self.executor.apply_deferred(world);
     }
 
-    /// Returns an iterator over all systems in this schedule.
+    /// Returns an iterator over all systems in this schedule, in topological order.
     ///
     /// Note: this method will return [`ScheduleNotInitialized`] if the
     /// schedule has never been initialized or run.
     pub fn systems(
         &self,
-    ) -> Result<impl Iterator<Item = (SystemKey, &ScheduleSystem)>, ScheduleNotInitialized> {
-        if !self.executor.is_initialized() {
-            return Err(ScheduleNotInitialized);
-        }
+    ) -> Result<impl ExactSizeIterator<Item = (SystemKey, &ScheduleSystem)>, ScheduleNotInitialized>
+    {
+        let flat_dependency = self
+            .graph
+            .flat_dependency()?
+            .get_toposort()
+            .ok_or(ScheduleNotInitialized)?;
 
-        let iter = self
-            .executable()
-            .system_ids
+        Ok(flat_dependency
             .iter()
-            .zip(&self.executable().systems)
-            .map(|(&node_id, system)| (node_id, &system.system));
-
-        Ok(iter)
-    }
-
-    /// Returns the number of systems in this schedule.
-    pub fn systems_len(&self) -> usize {
-        if !self.executor.is_initialized() {
-            self.graph.systems.len()
-        } else {
-            self.executable().systems.len()
-        }
+            .map(|&key| (key, &self.graph.systems[key].system)))
     }
 
     /// Returns warnings that were generated during the last call to
@@ -645,6 +623,10 @@ pub struct ScheduleGraph {
     hierarchy: Dag<NodeId>,
     /// Directed acyclic graph of the dependency (which systems/sets have to run before which other systems/sets)
     dependency: Dag<NodeId>,
+    /// Directed acyclic graph of the dependencies between systems, with all
+    /// dependencies between sets and systems "flattened" into direct dependencies
+    /// between systems.
+    flat_dependency: Dag<SystemKey>,
     /// Map of systems in each set
     set_systems: DagGroups<SystemSetKey, SystemKey>,
     ambiguous_with: UnGraph<NodeId>,
@@ -665,6 +647,7 @@ impl ScheduleGraph {
             system_sets: SystemSets::default(),
             hierarchy: Dag::new(),
             dependency: Dag::new(),
+            flat_dependency: Dag::new(),
             set_systems: DagGroups::default(),
             ambiguous_with: UnGraph::default(),
             ambiguous_with_all: HashSet::default(),
@@ -690,6 +673,16 @@ impl ScheduleGraph {
     /// a system or set has to run before another system or set.
     pub fn dependency(&self) -> &Dag<NodeId> {
         &self.dependency
+    }
+
+    /// Returns the "flattened" [`Dag`] of dependencies between systems, or
+    /// `None` if the schedule has not been built since the last change to the graph.
+    pub fn flat_dependency(&self) -> Result<&Dag<SystemKey>, ScheduleNotInitialized> {
+        if self.changed {
+            Err(ScheduleNotInitialized)
+        } else {
+            Ok(&self.flat_dependency)
+        }
     }
 
     /// Returns the list of systems that conflict with each other, i.e. have ambiguities in their access.
@@ -774,7 +767,7 @@ impl ScheduleGraph {
     fn apply_collective_conditions<T: Schedulable<Metadata = GraphInfo, GroupMetadata = Chain>>(
         &mut self,
         configs: &mut [ScheduleConfigs<T>],
-        collective_conditions: Vec<BoxedCondition>,
+        collective_conditions: Vec<ConditionArc>,
     ) {
         if !collective_conditions.is_empty() {
             if let [config] = configs {
@@ -1293,7 +1286,7 @@ impl ScheduleGraph {
     fn get_node_name_inner(&self, id: &NodeId, report_sets: bool) -> String {
         match *id {
             NodeId::System(key) => {
-                let name = self.systems[key].name();
+                let name = self.systems[key].lock().name();
                 let name = if self.settings.use_shortnames {
                     name.shortname().to_string()
                 } else {
@@ -1530,7 +1523,7 @@ mod tests {
         schedule.run(&mut world);
 
         // inserted a sync point
-        assert_eq!(schedule.systems_len(), 3);
+        assert_eq!(schedule.graph().systems.len(), 3);
     }
 
     #[test]
@@ -1548,7 +1541,7 @@ mod tests {
         schedule.run(&mut world);
 
         // No sync point was inserted, since we can reuse the explicit sync point.
-        assert_eq!(schedule.systems_len(), 5);
+        assert_eq!(schedule.graph().systems.len(), 5);
     }
 
     #[test]
@@ -1566,7 +1559,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.systems_len(), 6);
+        assert_eq!(schedule.graph().systems.len(), 6);
     }
 
     #[test]
@@ -1584,7 +1577,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.systems_len(), 6);
+        assert_eq!(schedule.graph().systems.len(), 6);
     }
 
     #[test]
@@ -1606,7 +1599,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.systems_len(), 6);
+        assert_eq!(schedule.graph().systems.len(), 6);
     }
 
     #[test]
@@ -1632,7 +1625,7 @@ mod tests {
         schedule.run(&mut world);
 
         // A sync point was inserted, since the explicit sync point is not always run.
-        assert_eq!(schedule.systems_len(), 6);
+        assert_eq!(schedule.graph().systems.len(), 6);
     }
 
     #[test]
@@ -1653,7 +1646,7 @@ mod tests {
         schedule.run(&mut world);
 
         // inserted sync points
-        assert_eq!(schedule.systems_len(), 4);
+        assert_eq!(schedule.graph().systems.len(), 4);
 
         // merges sync points on rebuild
         schedule.add_systems(((
@@ -1666,7 +1659,7 @@ mod tests {
             .chain(),));
         schedule.run(&mut world);
 
-        assert_eq!(schedule.systems_len(), 7);
+        assert_eq!(schedule.graph().systems.len(), 7);
     }
 
     #[test]
@@ -1684,7 +1677,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.systems_len(), 5);
+        assert_eq!(schedule.graph().systems.len(), 5);
     }
 
     #[test]
@@ -1708,7 +1701,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.systems_len(), 6); // 5 systems + 1 sync point
+        assert_eq!(schedule.graph().systems.len(), 6); // 5 systems + 1 sync point
     }
 
     #[test]
@@ -1741,7 +1734,7 @@ mod tests {
 
         schedule.run(&mut world);
 
-        assert_eq!(schedule.systems_len(), 4); // 3 systems + 1 sync point
+        assert_eq!(schedule.graph().systems.len(), 4); // 3 systems + 1 sync point
     }
 
     #[test]
@@ -1761,7 +1754,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        assert_eq!(schedule.systems_len(), 2);
+        assert_eq!(schedule.graph().systems.len(), 2);
     }
 
     mod no_sync_edges {
@@ -1788,7 +1781,7 @@ mod tests {
 
             schedule.run(&mut world);
 
-            assert_eq!(schedule.systems_len(), 2);
+            assert_eq!(schedule.graph().systems.len(), 2);
         }
 
         #[test]
@@ -1873,7 +1866,7 @@ mod tests {
 
             schedule.run(&mut world);
 
-            assert_eq!(schedule.systems_len(), expected_num_systems);
+            assert_eq!(schedule.graph().systems.len(), expected_num_systems);
         }
 
         #[test]
