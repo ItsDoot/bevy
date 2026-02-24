@@ -229,7 +229,7 @@ impl Schedules {
     }
 }
 
-fn make_executor(kind: ExecutorKind) -> Box<dyn SystemExecutor> {
+fn make_executor(kind: ExecutorKind) -> Box<dyn ScheduleExecutor> {
     match kind {
         ExecutorKind::SingleThreaded => Box::new(SingleThreadedExecutor::new()),
         #[cfg(feature = "std")]
@@ -342,7 +342,7 @@ impl Chain {
 pub struct Schedule {
     label: InternedScheduleLabel,
     graph: ScheduleGraph,
-    executor: Box<dyn SystemExecutor>,
+    executor: Box<dyn ScheduleExecutor>,
     warnings: Option<Box<[ScheduleBuildWarning]>>,
 }
 
@@ -484,6 +484,26 @@ impl Schedule {
         self
     }
 
+    /// Returns a reference to the schedule's executor.
+    pub fn executor(&self) -> &dyn ScheduleExecutor {
+        self.executor.as_ref()
+    }
+
+    /// Returns a mutable reference to the schedule's executor.
+    pub fn executor_mut(&mut self) -> &mut dyn ScheduleExecutor {
+        self.executor.as_mut()
+    }
+
+    /// Sets the schedule's executor directly. This is only necessary if you
+    /// want to use a custom executor that implements [`SystemExecutor`].
+    ///
+    /// Otherwise, use [`set_executor_kind`](Self::set_executor_kind) to set the
+    /// execution strategy.
+    pub fn set_executor(&mut self, executor: Box<dyn ScheduleExecutor>) -> &mut Self {
+        self.executor = executor;
+        self
+    }
+
     /// Set whether the schedule applies deferred system buffers on final time or not. This is a catch-all
     /// in case a system uses commands but was not explicitly ordered before an instance of
     /// [`ApplyDeferred`]. By default this
@@ -612,7 +632,7 @@ impl Schedule {
 /// Metadata for a [`Schedule`].
 ///
 /// The order isn't optimized; calling `ScheduleGraph::build_schedule` will return a
-/// `SystemSchedule` where the order is optimized for execution.
+/// `ScheduleExecutable` where the order is optimized for execution.
 #[derive(Default)]
 pub struct ScheduleGraph {
     /// Container of systems in the schedule.
@@ -1102,7 +1122,7 @@ impl ScheduleGraph {
         self.system_sets.initialize(world);
     }
 
-    /// Builds an execution-optimized [`SystemSchedule`] from the current state
+    /// Builds an execution-optimized [`ScheduleExecutable`] from the current state
     /// of the graph. Also returns any warnings that were generated during the
     /// build process.
     ///

@@ -14,8 +14,8 @@ use crate::{
     error::{ErrorContext, ErrorHandler, Result},
     schedule::{
         graph::{Dag, DagAnalysis},
-        is_apply_deferred, ConditionWithAccess, ExecutorKind, NodeId, ScheduleGraph,
-        ScheduleNotInitialized, SystemExecutor, SystemKey, SystemSchedule,
+        is_apply_deferred, ConditionWithAccess, ExecutorKind, NodeId, ScheduleExecutable,
+        ScheduleExecutor, ScheduleGraph, ScheduleNotInitialized, SystemKey,
     },
     system::{RunSystemError, ScheduleSystem},
     world::World,
@@ -32,7 +32,7 @@ use super::__rust_begin_short_backtrace;
 /// other things, or just trying minimize overhead.
 #[derive(Default)]
 pub struct SingleThreadedExecutor {
-    executable: Option<SystemSchedule>,
+    executable: Option<ScheduleExecutable>,
     /// System sets whose conditions have been evaluated.
     evaluated_sets: FixedBitSet,
     /// Systems that have run or been skipped.
@@ -43,7 +43,7 @@ pub struct SingleThreadedExecutor {
     apply_final_deferred: bool,
 }
 
-impl SystemExecutor for SingleThreadedExecutor {
+impl ScheduleExecutor for SingleThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::SingleThreaded
     }
@@ -58,7 +58,7 @@ impl SystemExecutor for SingleThreadedExecutor {
         flat_dependency: &Dag<SystemKey>,
         hierarchy_analysis: &DagAnalysis<NodeId>,
     ) {
-        let (executable, _) = SystemSchedule::new(graph, flat_dependency, hierarchy_analysis);
+        let (executable, _) = ScheduleExecutable::new(graph, flat_dependency, hierarchy_analysis);
 
         // pre-allocate space
         let sys_count = executable.system_ids.len();

@@ -28,12 +28,16 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
-/// Types that can run a [`SystemSchedule`] on a [`World`].
-pub(super) trait SystemExecutor: Send + Sync {
+/// Types that can run a [`ScheduleGraph`] on a [`World`].
+pub trait ScheduleExecutor: Send + Sync {
+    /// Returns the execution strategy of this executor.
     fn kind(&self) -> ExecutorKind;
 
+    /// Returns `true` if this executor has been initialized with a schedule
+    /// graph and its build output.
     fn is_initialized(&self) -> bool;
 
+    /// Initializes the executor with the given schedule graph and its build output.
     fn initialize(
         &mut self,
         graph: &ScheduleGraph,
@@ -41,6 +45,15 @@ pub(super) trait SystemExecutor: Send + Sync {
         hierarchy_analysis: &DagAnalysis<NodeId>,
     );
 
+    /// Runs the executor on the given world, executing systems according to its
+    /// initialized schedule graph and build output.
+    ///
+    /// If `skip_systems` is provided, the executor will skip running any system
+    /// whose index in the [`ScheduleGraph`] is in the `FixedBitSet`.
+    ///
+    /// The `error_handler` will be called for any system that returns an error
+    /// during execution, along with the error and the context of the error
+    /// (including the system that caused the error and the error's source, if any).
     fn run(
         &mut self,
         world: &mut World,
@@ -48,10 +61,24 @@ pub(super) trait SystemExecutor: Send + Sync {
         error_handler: fn(BevyError, ErrorContext),
     ) -> Result<(), ScheduleNotInitialized>;
 
+    /// Sets whether this executor should apply deferred commands from systems
+    /// at the end of the schedule run. If `false`, deferred commands will only
+    /// be applied at sync points.
     fn set_apply_final_deferred(&mut self, value: bool);
 
+    /// Iterates the change ticks of all systems in the schedule and clamps any older than
+    /// [`MAX_CHANGE_AGE`](crate::change_detection::MAX_CHANGE_AGE).
+    /// This prevents overflow and thus prevents false positives.
     fn check_change_ticks(&mut self, check: CheckChangeTicks);
 
+    /// Directly applies any accumulated [`Deferred`](crate::system::Deferred) system parameters (like [`Commands`](crate::prelude::Commands)) to the `world`.
+    ///
+    /// Like always, deferred system parameters are applied in the "topological sort order" of the schedule graph.
+    /// As a result, buffers from one system are only guaranteed to be applied before those of other systems
+    /// if there is an explicit system ordering between the two systems.
+    ///
+    /// This is used in rendering to extract data from the main world, storing the data in system buffers,
+    /// before applying their buffers in a different world.
     fn apply_deferred(&mut self, world: &mut World);
 }
 
@@ -87,7 +114,7 @@ pub enum ExecutorKind {
 /// Since the arrays are sorted in the same order, elements are referenced by their index.
 /// [`FixedBitSet`] is used as a smaller, more efficient substitute of `HashSet<usize>`.
 #[derive(Default)]
-pub struct SystemSchedule {
+pub struct ScheduleExecutable {
     /// List of system node ids.
     pub(super) system_ids: Vec<SystemKey>,
     /// Indexed by system node id.
@@ -108,8 +135,8 @@ pub struct SystemSchedule {
     pub(super) systems_in_sets_with_conditions: Vec<FixedBitSet>,
 }
 
-impl SystemSchedule {
-    /// Creates an empty [`SystemSchedule`].
+impl ScheduleExecutable {
+    /// Creates an empty executable.
     pub const fn empty() -> Self {
         Self {
             system_ids: Vec::new(),

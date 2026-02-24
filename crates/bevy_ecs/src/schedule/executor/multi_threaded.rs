@@ -21,8 +21,8 @@ use crate::{
             Dag, DagAnalysis,
             Direction::{Incoming, Outgoing},
         },
-        is_apply_deferred, ConditionWithAccess, ExecutorKind, NodeId, ScheduleGraph,
-        ScheduleNotInitialized, SystemExecutor, SystemKey, SystemSchedule, SystemWithAccess,
+        is_apply_deferred, ConditionWithAccess, ExecutorKind, NodeId, ScheduleExecutable,
+        ScheduleExecutor, ScheduleGraph, ScheduleNotInitialized, SystemKey, SystemWithAccess,
     },
     system::{RunSystemError, ScheduleSystem},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -74,8 +74,9 @@ struct SystemResult {
     system_index: usize,
 }
 
+/// Multi-threading dependency information for [`ScheduleExecutable`]s.
 #[derive(Default)]
-struct SystemScheduleMT {
+struct ScheduleExecutableMT {
     /// Indexed by system node id.
     /// Number of systems that the system immediately depends on.
     pub(super) system_dependencies: Vec<usize>,
@@ -84,7 +85,7 @@ struct SystemScheduleMT {
     pub(super) system_dependents: Vec<Vec<usize>>,
 }
 
-impl SystemScheduleMT {
+impl ScheduleExecutableMT {
     /// Creates a new schedule executable from the given graph and its analyses.
     /// It should be initialized with [`fill`] before it can be run.
     pub fn new(
@@ -118,7 +119,7 @@ impl SystemScheduleMT {
 
 /// Runs the schedule using a thread pool. Non-conflicting systems can run in parallel.
 pub struct MultiThreadedExecutor {
-    executable: Option<(SystemSchedule, SystemScheduleMT)>,
+    executable: Option<(ScheduleExecutable, ScheduleExecutableMT)>,
     /// The running state, protected by a mutex so that a reference to the executor can be shared across tasks.
     state: Mutex<ExecutorState>,
     /// Queue of system completion events.
@@ -180,7 +181,7 @@ impl Default for MultiThreadedExecutor {
     }
 }
 
-impl SystemExecutor for MultiThreadedExecutor {
+impl ScheduleExecutor for MultiThreadedExecutor {
     fn kind(&self) -> ExecutorKind {
         ExecutorKind::MultiThreaded
     }
@@ -196,8 +197,8 @@ impl SystemExecutor for MultiThreadedExecutor {
         hierarchy_analysis: &DagAnalysis<NodeId>,
     ) {
         let (executable, dg_system_idx_map) =
-            SystemSchedule::new(graph, flat_dependency, hierarchy_analysis);
-        let executable_mt = SystemScheduleMT::new(flat_dependency, &dg_system_idx_map);
+            ScheduleExecutable::new(graph, flat_dependency, hierarchy_analysis);
+        let executable_mt = ScheduleExecutableMT::new(flat_dependency, &dg_system_idx_map);
 
         let state = self.state.get_mut().unwrap();
         // pre-allocate space
