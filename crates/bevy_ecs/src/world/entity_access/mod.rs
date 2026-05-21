@@ -407,7 +407,7 @@ mod tests {
         let mut entity = world.spawn_empty();
         OwningPtr::make(TestComponent(84), |ptr| {
             // SAFETY: `ptr` matches the component id
-            unsafe { entity.insert_by_ids(&[test_component_id], vec![ptr].into_iter()) };
+            unsafe { entity.insert_by_ids(&[test_component_id], vec![ptr]) };
         });
 
         let components: Vec<_> = world.query::<&TestComponent>().iter(&world).collect();
@@ -429,7 +429,7 @@ mod tests {
         OwningPtr::make(test_component_value, |ptr1| {
             OwningPtr::make(test_component_2_value, |ptr2| {
                 // SAFETY: `ptr1` and `ptr2` match the component ids
-                unsafe { entity.insert_by_ids(&component_ids, vec![ptr1, ptr2].into_iter()) };
+                unsafe { entity.insert_by_ids(&component_ids, vec![ptr1, ptr2]) };
             });
         });
 

@@ -9,7 +9,7 @@ use crate::{
     world::{EntityWorldMut, World},
 };
 use alloc::vec::Vec;
-use bevy_ptr::{move_as_ptr, MovingPtr};
+use bevy_ptr::{move_as_ptr, MovingPtr, PtrMut};
 use core::{
     marker::PhantomData,
     mem::{self, MaybeUninit},
@@ -332,6 +332,15 @@ impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<
         mem::forget(ptr);
     }
 
+    fn visit_components(
+        &mut self,
+        func: &mut impl FnMut(crate::component::StorageType, PtrMut<'_>),
+    ) {
+        let mut target =
+            <R::RelationshipTarget as RelationshipTarget>::with_capacity(self.list.size_hint());
+        <R::RelationshipTarget as DynamicBundle>::visit_components(&mut target, func);
+    }
+
     unsafe fn apply_effect(ptr: MovingPtr<'_, MaybeUninit<Self>>, entity: &mut EntityWorldMut) {
         // SAFETY: The value was not moved out in `get_components`, only borrowed, and thus should still
         // be valid and initialized.
@@ -379,6 +388,14 @@ impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
         unsafe { <R::RelationshipTarget as DynamicBundle>::get_components(target, func) };
         // Forget the pointer so that the value is available in `apply_effect`.
         mem::forget(ptr);
+    }
+
+    fn visit_components(
+        &mut self,
+        func: &mut impl FnMut(crate::component::StorageType, PtrMut<'_>),
+    ) {
+        let mut target = <R::RelationshipTarget as RelationshipTarget>::with_capacity(1);
+        <R::RelationshipTarget as DynamicBundle>::visit_components(&mut target, func);
     }
 
     unsafe fn apply_effect(ptr: MovingPtr<'_, MaybeUninit<Self>>, entity: &mut EntityWorldMut) {

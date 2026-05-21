@@ -33,6 +33,8 @@ pub struct DeriveComponent {
     pub on_add: Option<HookAttributeKind>,
     /// The `on_insert` hook.
     pub on_insert: Option<HookAttributeKind>,
+    /// The `on_replace` hook.
+    pub on_replace: Option<HookAttributeKind>,
     /// The `on_discard` hook.
     pub on_discard: Option<HookAttributeKind>,
     /// The `on_remove` hook.
@@ -60,6 +62,7 @@ impl DeriveComponent {
             storage: None,
             on_add: None,
             on_insert: None,
+            on_replace: None,
             on_discard: None,
             on_remove: None,
             on_despawn: None,
@@ -97,6 +100,11 @@ impl DeriveComponent {
                     } else if nested.path.is_ident(ON_INSERT) {
                         attrs.on_insert = Some(HookAttributeKind::parse(nested.input, || {
                             parse_quote! { Self::on_insert }
+                        })?);
+                        Ok(())
+                    } else if nested.path.is_ident(ON_REPLACE) {
+                        attrs.on_replace = Some(HookAttributeKind::parse(nested.input, || {
+                            parse_quote! { Self::on_replace }
                         })?);
                         Ok(())
                     } else if nested.path.is_ident(ON_DISCARD) {
@@ -222,6 +230,9 @@ impl DeriveComponent {
         let mut on_insert_path =
             Vec::from_iter(self.on_insert.map(|path| path.to_token_stream(bevy_ecs)));
 
+        let on_replace_path =
+            Vec::from_iter(self.on_replace.map(|path| path.to_token_stream(bevy_ecs)));
+
         let mut on_discard_path =
             Vec::from_iter(self.on_discard.map(|path| path.to_token_stream(bevy_ecs)));
 
@@ -245,6 +256,11 @@ impl DeriveComponent {
 
         let on_add = hook_register_function_call(bevy_ecs, quote! {on_add}, &on_add_path);
         let on_insert = hook_register_function_call(bevy_ecs, quote! {on_insert}, &on_insert_path);
+        let on_replace = replacement_hook_register_function_call(
+            bevy_ecs,
+            quote! {on_replace},
+            &on_replace_path,
+        );
         let on_discard =
             hook_register_function_call(bevy_ecs, quote! {on_discard}, &on_discard_path);
         let on_remove = hook_register_function_call(bevy_ecs, quote! {on_remove}, &on_remove_path);
@@ -349,6 +365,7 @@ impl DeriveComponent {
 
                 #on_add
                 #on_insert
+                #on_replace
                 #on_discard
                 #on_remove
                 #on_despawn
@@ -503,6 +520,7 @@ const RELATIONSHIP_TARGET: &str = "relationship_target";
 
 const ON_ADD: &str = "on_add";
 const ON_INSERT: &str = "on_insert";
+const ON_REPLACE: &str = "on_replace";
 const ON_DISCARD: &str = "on_discard";
 const ON_REMOVE: &str = "on_remove";
 const ON_DESPAWN: &str = "on_despawn";
@@ -692,6 +710,29 @@ fn hook_register_function_call(
     };
     quote! {
         fn #hook() -> #FQOption<#bevy_ecs_path::lifecycle::ComponentHook> {
+            #FQOption::Some(#hook_function)
+        }
+    }
+}
+
+fn replacement_hook_register_function_call(
+    bevy_ecs_path: &Path,
+    hook: TokenStream,
+    functions: &[TokenStream],
+) -> TokenStream {
+    let hook_function = match functions {
+        [] => return TokenStream::new(),
+        [single] => single.clone(),
+        multiple => {
+            quote! {
+                |mut world: #bevy_ecs_path::world::DeferredWorld, context: #bevy_ecs_path::lifecycle::HookContext, mut new: #bevy_ecs_path::ptr::PtrMut<'_>| {
+                    #(#multiple(world.reborrow(), context.clone(), new.reborrow());)*
+                }
+            }
+        }
+    };
+    quote! {
+        fn #hook() -> #FQOption<#bevy_ecs_path::lifecycle::ComponentReplaceHook> {
             #FQOption::Some(#hook_function)
         }
     }

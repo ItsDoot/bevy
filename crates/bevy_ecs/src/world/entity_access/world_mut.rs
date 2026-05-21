@@ -26,8 +26,9 @@ use crate::{
 };
 
 use alloc::vec::Vec;
-use bevy_ptr::{move_as_ptr, MovingPtr, OwningPtr};
+use bevy_ptr::{deconstruct_moving_ptr, move_as_ptr, MovingPtr, OwningPtr, PtrMut};
 use core::{any::TypeId, marker::PhantomData, mem::MaybeUninit};
+use smallvec::{smallvec, SmallVec};
 
 /// A mutable reference to a particular [`Entity`], and the entire world.
 ///
@@ -1172,8 +1173,8 @@ impl<'w> EntityWorldMut<'w> {
                 bundle_inserter,
                 self.entity,
                 location,
-                Some(component).into_iter(),
-                Some(storage_type).iter().cloned(),
+                smallvec![component],
+                &[storage_type],
                 mode,
                 caller,
                 relationship_hook_insert_mode,
@@ -1201,25 +1202,25 @@ impl<'w> EntityWorldMut<'w> {
     ///
     /// If the entity has been despawned while this `EntityWorldMut` is still alive.
     #[track_caller]
-    pub unsafe fn insert_by_ids<'a, I: Iterator<Item = OwningPtr<'a>>>(
+    pub unsafe fn insert_by_ids(
         &mut self,
         component_ids: &[ComponentId],
-        iter_components: I,
+        components: Vec<OwningPtr<'_>>,
     ) -> &mut Self {
         // SAFETY:
         // same preconditions
         unsafe {
-            self.insert_by_ids_internal(component_ids, iter_components, RelationshipHookMode::Run)
+            self.insert_by_ids_internal(component_ids, components.into(), RelationshipHookMode::Run)
         }
     }
 
     /// # Safety
     /// see [`EntityWorldMut::insert_by_ids`]
     #[track_caller]
-    pub(crate) unsafe fn insert_by_ids_internal<'a, I: Iterator<Item = OwningPtr<'a>>>(
+    pub(crate) unsafe fn insert_by_ids_internal(
         &mut self,
         component_ids: &[ComponentId],
-        iter_components: I,
+        components: SmallVec<[OwningPtr<'_>; 2]>,
         relationship_hook_insert_mode: RelationshipHookMode,
     ) -> &mut Self {
         let location = self.location();
@@ -1250,8 +1251,8 @@ impl<'w> EntityWorldMut<'w> {
                 bundle_inserter,
                 self.entity,
                 location,
-                iter_components,
-                (*storage_types).iter().cloned(),
+                components,
+                &storage_types,
                 InsertMode::Replace,
                 MaybeLocation::caller(),
                 relationship_hook_insert_mode,
@@ -2395,33 +2396,46 @@ impl<'a> From<&'a mut EntityWorldMut<'_>> for FilteredEntityMut<'a, 'static> {
 /// - [`OwningPtr`] and [`StorageType`] iterators must correspond to the
 ///   [`BundleInfo`](crate::bundle::BundleInfo) used to construct [`BundleInserter`]
 /// - [`Entity`] must correspond to [`EntityLocation`]
-unsafe fn insert_dynamic_bundle<
-    'a,
-    I: Iterator<Item = OwningPtr<'a>>,
-    S: Iterator<Item = StorageType>,
->(
+unsafe fn insert_dynamic_bundle(
     mut bundle_inserter: BundleInserter<'_>,
     entity: Entity,
     location: EntityLocation,
-    components: I,
-    storage_types: S,
+    components: SmallVec<[OwningPtr<'_>; 2]>,
+    storage_types: &[StorageType],
     mode: InsertMode,
     caller: MaybeLocation,
     relationship_hook_insert_mode: RelationshipHookMode,
 ) -> EntityLocation {
-    struct DynamicInsertBundle<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> {
-        components: I,
+    struct DynamicInsertBundle<'a, 'b> {
+        components: SmallVec<[OwningPtr<'a>; 2]>,
+        storage_types: &'b [StorageType],
     }
 
-    impl<'a, I: Iterator<Item = (StorageType, OwningPtr<'a>)>> DynamicBundle
-        for DynamicInsertBundle<'a, I>
-    {
+    impl DynamicBundle for DynamicInsertBundle<'_, '_> {
         type Effect = ();
         unsafe fn get_components(
-            mut ptr: MovingPtr<'_, Self>,
+            ptr: MovingPtr<'_, Self>,
             func: &mut impl FnMut(StorageType, OwningPtr<'_>),
         ) {
-            (&mut ptr.components).for_each(|(t, ptr)| func(t, ptr));
+            deconstruct_moving_ptr!({
+                let Self {
+                    components,
+                    storage_types,
+                } = ptr;
+            });
+            let components = components.read();
+
+            for (storage_type, component_ptr) in storage_types.iter().zip(components) {
+                func(*storage_type, component_ptr);
+            }
+        }
+
+        fn visit_components(&mut self, func: &mut impl FnMut(StorageType, PtrMut<'_>)) {
+            for (storage_type, component_ptr) in
+                self.storage_types.iter().zip(self.components.iter_mut())
+            {
+                func(*storage_type, component_ptr.as_mut());
+            }
         }
 
         unsafe fn apply_effect(
@@ -2432,7 +2446,8 @@ unsafe fn insert_dynamic_bundle<
     }
 
     let bundle = DynamicInsertBundle {
-        components: storage_types.zip(components),
+        components,
+        storage_types,
     };
 
     move_as_ptr!(bundle);

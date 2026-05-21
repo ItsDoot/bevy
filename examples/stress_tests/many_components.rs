@@ -153,7 +153,7 @@ fn stress_test(num_entities: u32, num_components: u32, num_systems: u32) {
         // * component_id's are from the same world
         // * `values` was initialized above, so references are valid
         unsafe {
-            entity.insert_by_ids(&components, ptrs.into_iter());
+            entity.insert_by_ids(&components, ptrs);
         }
     }
 
