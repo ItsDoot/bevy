@@ -199,6 +199,7 @@ impl<'w> BundleRemover<'w> {
                 entity,
                 bundle_components_in_archetype(),
                 caller,
+                self.relationship_hook_mode,
             );
         }
 

@@ -15,7 +15,7 @@ pub(crate) use insert::BundleInserter;
 pub(crate) use remove::BundleRemover;
 pub(crate) use spawner::BundleSpawner;
 
-use bevy_ptr::MovingPtr;
+use bevy_ptr::{MovingPtr, PtrMut};
 use core::mem::MaybeUninit;
 pub use info::*;
 pub use writer::*;
@@ -268,6 +268,23 @@ pub trait DynamicBundle: Sized {
         ptr: MovingPtr<'_, Self>,
         func: &mut impl FnMut(StorageType, OwningPtr<'_>),
     );
+
+    /// Visits each component in this bundle by mutable reference.
+    ///
+    /// This is used to expose the *new* values about to be inserted to lifecycle hooks (such as
+    /// `on_replace`) before the bundle is moved into ECS storage by
+    /// [`get_components`](DynamicBundle::get_components).
+    ///
+    /// For implementors:
+    /// - `func` must be called for each component of this bundle in *exactly the same order*
+    ///   as [`get_components`] / [`Bundle::get_component_ids`], with a [`PtrMut`] pointing to
+    ///   the component's storage within `Self` and the component's [`StorageType`].
+    /// - After `func` returns, the component value must still be fully valid (hooks are
+    ///   permitted to mutate the value in place, but must not move it out or leave it in an
+    ///   invalid state).
+    ///
+    /// [`get_components`]: DynamicBundle::get_components
+    fn visit_components(&mut self, func: &mut impl FnMut(StorageType, PtrMut<'_>));
 
     /// Applies the after-effects of spawning this bundle.
     ///

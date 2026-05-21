@@ -9,11 +9,8 @@ use crate::{
     world::{EntityWorldMut, World},
 };
 use alloc::vec::Vec;
-use bevy_ptr::{move_as_ptr, MovingPtr};
-use core::{
-    marker::PhantomData,
-    mem::{self, MaybeUninit},
-};
+use bevy_ptr::{move_as_ptr, MovingPtr, PtrMut};
+use core::mem::MaybeUninit;
 use variadics_please::all_tuples_enumerated;
 
 /// A wrapper over a [`Bundle`] indicating that an entity should be spawned with that [`Bundle`].
@@ -291,7 +288,7 @@ all_tuples_enumerated!(
 /// This is intended to be created using [`SpawnRelated`].
 pub struct SpawnRelatedBundle<R: Relationship, L: SpawnableList<R>> {
     list: L,
-    marker: PhantomData<R>,
+    target: R::RelationshipTarget,
 }
 
 // SAFETY: This internally relies on the RelationshipTarget's Bundle implementation, which is sound.
@@ -318,9 +315,9 @@ impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<
         ptr: MovingPtr<'_, Self>,
         func: &mut impl FnMut(crate::component::StorageType, bevy_ptr::OwningPtr<'_>),
     ) {
-        let target =
-            <R::RelationshipTarget as RelationshipTarget>::with_capacity(ptr.list.size_hint());
-        move_as_ptr!(target);
+        bevy_ptr::deconstruct_moving_ptr!({
+            let Self { list: _, target } = ptr;
+        });
         // SAFETY:
         // - The caller must ensure that this is called exactly once before `apply_effect`.
         // - Assuming `DynamicBundle` is implemented correctly for `R::Relationship` target, `func` should be
@@ -328,23 +325,27 @@ impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<
         // - `Effect: !NoBundleEffect`, which means the caller is responsible for calling this type's `apply_effect`
         //   at least once before returning to safe code.
         unsafe { <R::RelationshipTarget as DynamicBundle>::get_components(target, func) };
-        // Forget the pointer so that the value is available in `apply_effect`.
-        mem::forget(ptr);
+    }
+
+    fn visit_components(
+        &mut self,
+        func: &mut impl FnMut(crate::component::StorageType, PtrMut<'_>),
+    ) {
+        <R::RelationshipTarget as DynamicBundle>::visit_components(&mut self.target, func);
     }
 
     unsafe fn apply_effect(ptr: MovingPtr<'_, MaybeUninit<Self>>, entity: &mut EntityWorldMut) {
-        // SAFETY: The value was not moved out in `get_components`, only borrowed, and thus should still
-        // be valid and initialized.
-        let effect = unsafe { ptr.assume_init() };
         bevy_ptr::deconstruct_moving_ptr!({
-            let Self { list, marker: _ } = effect;
+            let MaybeUninit::<Self> { list, target: _ } = ptr;
         });
-        let id = entity.id();
+        // SAFETY: `get_components` only moved `target`; `list` is still valid and initialized.
+        let list = unsafe { list.assume_init() };
 
         if entity.is_despawned() {
             return;
         }
 
+        let id = entity.id();
         entity.world_scope(|world: &mut World| {
             L::spawn(list, world, id);
         });
@@ -358,7 +359,7 @@ impl<R: Relationship, L: SpawnableList<R>> DynamicBundle for SpawnRelatedBundle<
 /// This is intended to be created using [`SpawnRelated`].
 pub struct SpawnOneRelated<R: Relationship, B: Bundle> {
     bundle: B,
-    marker: PhantomData<R>,
+    target: R::RelationshipTarget,
 }
 
 impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
@@ -368,8 +369,9 @@ impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
         ptr: MovingPtr<'_, Self>,
         func: &mut impl FnMut(crate::component::StorageType, bevy_ptr::OwningPtr<'_>),
     ) {
-        let target = <R::RelationshipTarget as RelationshipTarget>::with_capacity(1);
-        move_as_ptr!(target);
+        bevy_ptr::deconstruct_moving_ptr!({
+            let Self { bundle: _, target } = ptr;
+        });
         // SAFETY:
         // - The caller must ensure that this is called exactly once before `apply_effect`.
         // - Assuming `DynamicBundle` is implemented correctly for `R::Relationship` target, `func` should be
@@ -377,20 +379,27 @@ impl<R: Relationship, B: Bundle> DynamicBundle for SpawnOneRelated<R, B> {
         // - `Effect: !NoBundleEffect`, which means the caller is responsible for calling this type's `apply_effect`
         //   at least once before returning to safe code.
         unsafe { <R::RelationshipTarget as DynamicBundle>::get_components(target, func) };
-        // Forget the pointer so that the value is available in `apply_effect`.
-        mem::forget(ptr);
+    }
+
+    fn visit_components(
+        &mut self,
+        func: &mut impl FnMut(crate::component::StorageType, PtrMut<'_>),
+    ) {
+        <R::RelationshipTarget as DynamicBundle>::visit_components(&mut self.target, func);
     }
 
     unsafe fn apply_effect(ptr: MovingPtr<'_, MaybeUninit<Self>>, entity: &mut EntityWorldMut) {
-        // SAFETY: The value was not moved out in `get_components`, only borrowed, and thus should still
-        // be valid and initialized.
-        let effect = unsafe { ptr.assume_init() };
+        bevy_ptr::deconstruct_moving_ptr!({
+            let MaybeUninit::<Self> { bundle, target: _ } = ptr;
+        });
+        // SAFETY: `get_components` only moved `target`; `bundle` is still valid and initialized.
+        let bundle = unsafe { bundle.assume_init() };
+
         if entity.is_despawned() {
             return;
         }
 
-        let effect = effect.read();
-        entity.with_related::<R>(effect.bundle);
+        entity.with_related::<R>(bundle.read());
     }
 }
 
@@ -444,15 +453,15 @@ impl<T: RelationshipTarget> SpawnRelated for T {
         list: L,
     ) -> SpawnRelatedBundle<Self::Relationship, L> {
         SpawnRelatedBundle {
+            target: Self::with_capacity(list.size_hint()),
             list,
-            marker: PhantomData,
         }
     }
 
     fn spawn_one<B: Bundle>(bundle: B) -> SpawnOneRelated<Self::Relationship, B> {
         SpawnOneRelated {
             bundle,
-            marker: PhantomData,
+            target: Self::with_capacity(1),
         }
     }
 }

@@ -163,7 +163,8 @@ impl<'a> BundleWriter<'a> {
                 self.0
                     .component_ptrs
                     .drain(..)
-                    .map(|ptr| OwningPtr::new(ptr)),
+                    .map(|ptr| OwningPtr::new(ptr))
+                    .collect(),
                 relationship_hook_insert_mode,
             );
         }

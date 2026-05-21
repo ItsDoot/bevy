@@ -614,6 +614,7 @@ impl<'w> DeferredWorld<'w> {
         entity: Entity,
         targets: impl Iterator<Item = ComponentId>,
         caller: MaybeLocation,
+        relationship_hook_mode: RelationshipHookMode,
     ) {
         if archetype.has_add_hook() {
             for component_id in targets {
@@ -626,7 +627,7 @@ impl<'w> DeferredWorld<'w> {
                             entity,
                             component_id,
                             caller,
-                            relationship_hook_mode: RelationshipHookMode::Run,
+                            relationship_hook_mode,
                         },
                     );
                 }
@@ -709,6 +710,7 @@ impl<'w> DeferredWorld<'w> {
         entity: Entity,
         targets: impl Iterator<Item = ComponentId>,
         caller: MaybeLocation,
+        relationship_hook_mode: RelationshipHookMode,
     ) {
         if archetype.has_remove_hook() {
             for component_id in targets {
@@ -721,7 +723,7 @@ impl<'w> DeferredWorld<'w> {
                             entity,
                             component_id,
                             caller,
-                            relationship_hook_mode: RelationshipHookMode::Run,
+                            relationship_hook_mode,
                         },
                     );
                 }
@@ -740,6 +742,7 @@ impl<'w> DeferredWorld<'w> {
         entity: Entity,
         targets: impl Iterator<Item = ComponentId>,
         caller: MaybeLocation,
+        relationship_hook_mode: RelationshipHookMode,
     ) {
         if archetype.has_despawn_hook() {
             for component_id in targets {
@@ -752,7 +755,7 @@ impl<'w> DeferredWorld<'w> {
                             entity,
                             component_id,
                             caller,
-                            relationship_hook_mode: RelationshipHookMode::Run,
+                            relationship_hook_mode,
                         },
                     );
                 }

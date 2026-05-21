@@ -64,6 +64,7 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
 };
 
+use bevy_ptr::PtrMut;
 use derive_more::derive::Into;
 
 #[cfg(feature = "bevy_reflect")]
@@ -78,6 +79,10 @@ use core::{
 
 /// The type used for [`Component`] lifecycle hooks such as `on_add`, `on_insert` or `on_remove`.
 pub type ComponentHook = for<'w> fn(DeferredWorld<'w>, HookContext);
+
+/// The type used for [`Component`] lifecycle hooks such as `on_replace`, that
+/// need access to the new value of the component before the old value is discarded.
+pub type ComponentReplaceHook = for<'w> fn(DeferredWorld<'w>, HookContext, PtrMut<'_>);
 
 /// Context provided to a [`ComponentHook`].
 #[derive(Clone, Copy, Debug)]
@@ -149,6 +154,7 @@ pub struct HookContext {
 pub struct ComponentHooks {
     pub(crate) on_add: Option<ComponentHook>,
     pub(crate) on_insert: Option<ComponentHook>,
+    pub(crate) on_replace: Option<ComponentReplaceHook>,
     pub(crate) on_discard: Option<ComponentHook>,
     pub(crate) on_remove: Option<ComponentHook>,
     pub(crate) on_despawn: Option<ComponentHook>,
@@ -161,6 +167,9 @@ impl ComponentHooks {
         }
         if let Some(hook) = C::on_insert() {
             self.on_insert(hook);
+        }
+        if let Some(hook) = C::on_replace() {
+            self.on_replace(hook);
         }
         if let Some(hook) = C::on_discard() {
             self.on_discard(hook);
@@ -203,6 +212,16 @@ impl ComponentHooks {
     pub fn on_insert(&mut self, hook: ComponentHook) -> &mut Self {
         self.try_on_insert(hook)
             .expect("Component already has an on_insert hook")
+    }
+
+    /// Register a [`ComponentHook`] that will be run when this component is replaced.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if the component already has an `on_replace` hook
+    pub fn on_replace(&mut self, hook: ComponentReplaceHook) -> &mut Self {
+        self.try_on_replace(hook)
+            .expect("Component already has an on_replace hook")
     }
 
     /// Register a [`ComponentHook`] that will be run when this component is about to be dropped,
@@ -271,6 +290,19 @@ impl ComponentHooks {
             return None;
         }
         self.on_insert = Some(hook);
+        Some(self)
+    }
+
+    /// Attempt to register a [`ComponentHook`] that will be run when this component is replaced.
+    ///
+    /// This is a fallible version of [`Self::on_replace`].
+    ///
+    /// Returns `None` if the component already has an `on_replace` hook.
+    pub fn try_on_replace(&mut self, hook: ComponentReplaceHook) -> Option<&mut Self> {
+        if self.on_replace.is_some() {
+            return None;
+        }
+        self.on_replace = Some(hook);
         Some(self)
     }
 

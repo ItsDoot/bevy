@@ -435,7 +435,10 @@ impl<'a> BundleScratchSpace<'a> {
         unsafe {
             world.entity_mut(entity).insert_by_ids_internal(
                 &self.component_ids,
-                self.component_ptrs.into_iter().map(|ptr| ptr.promote()),
+                self.component_ptrs
+                    .into_iter()
+                    .map(|ptr| ptr.promote())
+                    .collect(),
                 relationship_hook_insert_mode,
             );
         }

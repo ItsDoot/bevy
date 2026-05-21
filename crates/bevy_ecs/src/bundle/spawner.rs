@@ -166,6 +166,7 @@ impl<'w> BundleSpawner<'w> {
                 entity,
                 bundle_info.iter_contributed_components(),
                 caller,
+                RelationshipHookMode::Run,
             );
             if archetype.has_add_observer() {
                 // SAFETY: the ADD event_key corresponds to the Add event's type

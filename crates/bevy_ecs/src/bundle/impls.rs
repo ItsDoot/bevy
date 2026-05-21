@@ -1,6 +1,6 @@
 use core::{any::TypeId, iter};
 
-use bevy_ptr::{MovingPtr, OwningPtr};
+use bevy_ptr::{MovingPtr, OwningPtr, PtrMut};
 use core::mem::MaybeUninit;
 use variadics_please::all_tuples_enumerated;
 
@@ -48,6 +48,11 @@ impl<C: Component> DynamicBundle for C {
         func: &mut impl FnMut(StorageType, OwningPtr<'_>),
     ) -> Self::Effect {
         func(C::STORAGE_TYPE, OwningPtr::from(ptr));
+    }
+
+    #[inline]
+    fn visit_components(&mut self, func: &mut impl FnMut(StorageType, PtrMut<'_>)) {
+        func(C::STORAGE_TYPE, PtrMut::from(self));
     }
 
     #[inline]
@@ -146,6 +151,19 @@ macro_rules! tuple_impl {
                 unsafe {
                     $( $name::get_components($alias, func); )*
                 }
+            }
+
+            #[allow(
+                clippy::unused_unit,
+                reason = "Zero-length tuples will generate a function body equivalent to `()`; however, this macro is meant for all applicable tuples, and as such it makes no sense to rewrite it just for that case."
+            )]
+            #[inline(always)]
+            fn visit_components(
+                &mut self,
+                func: &mut impl FnMut(StorageType, PtrMut<'_>),
+            ) {
+                let ($($alias,)*) = self;
+                $( $name::visit_components($alias, func); )*
             }
 
             #[allow(

@@ -139,6 +139,41 @@ fn component_hook_order_replace() {
 }
 
 #[test]
+fn component_hook_order_replace_with_new_value() {
+    let mut world = World::new();
+    world
+        .register_component_hooks::<V>()
+        .on_replace(|mut world, context, new| {
+            // SAFETY: the `on_replace` hook for `V` is always invoked with a `PtrMut` to a `V`.
+            let new = unsafe { new.deref_mut::<V>() };
+            // The new (incoming) value is accessible through the `PtrMut`...
+            assert_eq!(new, &mut V("two"));
+            // ...while the old value is still in storage and readable on the entity.
+            assert_eq!(world.entity(context.entity).get::<V>(), Some(&V("one")));
+            world.resource_mut::<R>().assert_order(0);
+        })
+        .on_discard(|mut world, context| {
+            assert_eq!(world.entity(context.entity).get::<V>(), Some(&V("one")));
+            world.resource_mut::<R>().assert_order(1);
+        })
+        .on_insert(|mut world, _| {
+            if let Some(mut r) = world.get_resource_mut::<R>() {
+                r.assert_order(2);
+            }
+        });
+
+    let entity = world.spawn(V("one")).id();
+    // Initializing `R` after the initial spawn means the `on_insert` hook above
+    // is a no-op for the first add, so the counter only observes the replace.
+    world.init_resource::<R>();
+    let mut entity_mut = world.entity_mut(entity);
+    entity_mut.insert(V("two"));
+    entity_mut.flush();
+    assert_eq!(3, world.resource::<R>().0);
+    assert_eq!(world.entity(entity).get::<V>(), Some(&V("two")));
+}
+
+#[test]
 fn component_hook_order_recursive() {
     let mut world = World::new();
     world.init_resource::<R>();

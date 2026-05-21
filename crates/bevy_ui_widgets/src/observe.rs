@@ -57,6 +57,14 @@ impl<E: EntityEvent, B: Bundle, M, I: IntoObserverSystem<E, B, M>> DynamicBundle
     }
 
     #[inline]
+    fn visit_components(
+        &mut self,
+        _func: &mut impl FnMut(bevy_ecs::component::StorageType, bevy_ecs::ptr::PtrMut<'_>),
+    ) {
+        // This bundle contributes no components, only an effect.
+    }
+
+    #[inline]
     unsafe fn apply_effect(
         ptr: bevy_ecs::ptr::MovingPtr<'_, mem::MaybeUninit<Self>>,
         entity: &mut bevy_ecs::world::EntityWorldMut,

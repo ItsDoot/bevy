@@ -182,6 +182,21 @@ pub fn derive_bundle(input: TokenStream) -> TokenStream {
 
             #[allow(unused_variables)]
             #[inline]
+            fn visit_components(
+                &mut self,
+                func: &mut impl ::core::ops::FnMut(#ecs_path::component::StorageType, #ecs_path::ptr::PtrMut<'_>)
+            ) {
+                let #struct_name { #(#active_field_members: #active_field_locals,)* #(#inactive_field_members: _,)* } = self;
+                #(
+                    <#active_field_types as #ecs_path::bundle::DynamicBundle>::visit_components(
+                        #active_field_locals,
+                        func
+                    );
+                )*
+            }
+
+            #[allow(unused_variables)]
+            #[inline]
             unsafe fn apply_effect(
                 ptr: #ecs_path::ptr::MovingPtr<'_, ::core::mem::MaybeUninit<Self>>,
                 func: &mut #ecs_path::world::EntityWorldMut<'_>,

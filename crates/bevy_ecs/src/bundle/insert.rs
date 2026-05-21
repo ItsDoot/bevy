@@ -1,18 +1,19 @@
 use alloc::vec::Vec;
 use bevy_ptr::{ConstNonNull, MovingPtr};
-use core::ptr::NonNull;
+use core::{ops::DerefMut, ptr::NonNull};
 
 use crate::{
     archetype::{
         Archetype, ArchetypeAfterBundleInsert, ArchetypeCreated, ArchetypeId, Archetypes,
-        ComponentStatus, ARCHETYPE_CREATED,
+        BundleComponentStatus, ComponentStatus, ARCHETYPE_CREATED,
     },
     bundle::{ArchetypeMoveType, Bundle, BundleId, BundleInfo, DynamicBundle, InsertMode},
     change_detection::{MaybeLocation, Tick},
     component::{Components, StorageType},
     entity::{Entities, Entity, EntityLocation},
-    event::{EntityComponentsTrigger, GlobalTrigger},
-    lifecycle::{Add, Discard, Insert, ADD, DISCARD, INSERT},
+    event::EntityComponentsTrigger,
+    event::GlobalTrigger,
+    lifecycle::{Add, Discard, HookContext, Insert, ADD, DISCARD, INSERT},
     observer::Observers,
     query::DebugCheckedUnwrap as _,
     relationship::RelationshipHookMode,
@@ -364,7 +365,7 @@ impl<'w> BundleInserter<'w> {
         &mut self,
         entity: Entity,
         location: EntityLocation,
-        bundle: MovingPtr<'_, T>,
+        mut bundle: MovingPtr<'_, T>,
         insert_mode: InsertMode,
         caller: MaybeLocation,
         relationship_hook_mode: RelationshipHookMode,
@@ -375,6 +376,50 @@ impl<'w> BundleInserter<'w> {
         // - we do not construct any other references into world.archetype.edges
         // - we run hooks, which can immutably access `Archetypes`, but cannot get a reference to edges through that
         let archetype_after_insert = unsafe { self.archetype_after_insert.as_ref() };
+
+        // Fire `on_replace` hooks for any explicit bundle components that already
+        // exist on the entity. These run BEFORE the new values are written and
+        // BEFORE the corresponding `on_discard` hooks for the old values.
+        if insert_mode == InsertMode::Replace
+            // SAFETY: `self.archetype` is a valid pointer into `world.archetypes`.
+            && unsafe { self.archetype.as_ref() }.has_replace_hook()
+        {
+            let world_cell = self.world;
+            // SAFETY:
+            // bundle_info valid for 'w, returned reference is only live for the replace call
+            let bundle_info = unsafe { self.bundle_info.as_ref() };
+            let mut bundle_component = 0usize;
+            T::visit_components(bundle.deref_mut(), &mut |_storage_type, ptr_mut| {
+                // SAFETY: `bundle_component` is guaranteed to be a valid index into `bundle_info.contributed_component_ids`
+                let component_id = unsafe {
+                    *bundle_info
+                        .contributed_component_ids
+                        .get_unchecked(bundle_component)
+                };
+                // SAFETY: `bundle_component` is guaranteed to be a valid index into `archetype_after_insert.bundle_component_statuses`
+                let status = unsafe { archetype_after_insert.get_status(bundle_component) };
+                bundle_component += 1;
+                if !matches!(status, ComponentStatus::Existing) {
+                    return;
+                }
+                // SAFETY: `component_id` is guaranteed to be valid
+                let hooks =
+                    unsafe { world_cell.components().get_info_unchecked(component_id) }.hooks();
+                if let Some(hook) = hooks.on_replace {
+                    hook(
+                        // SAFETY: We have no outstanding mutable references to world
+                        unsafe { world_cell.into_deferred() },
+                        HookContext {
+                            entity,
+                            component_id,
+                            caller,
+                            relationship_hook_mode,
+                        },
+                        ptr_mut,
+                    );
+                }
+            });
+        }
 
         let (new_archetype, new_location) = {
             // Non-generic prelude extracted to improve compile time by minimizing monomorphized code.
@@ -458,6 +503,7 @@ impl<'w> BundleInserter<'w> {
                 entity,
                 archetype_after_insert.added().iter().copied(),
                 caller,
+                relationship_hook_mode,
             );
             if new_archetype.has_add_observer() {
                 // SAFETY: the ADD event_key corresponds to the Add event's type
