@@ -6,7 +6,7 @@
 use bevy::{
     prelude::*,
     window::{PresentMode, RequestRedraw, WindowPlugin},
-    winit::{EventLoopProxyWrapper, WinitSettings, WinitUserEvent},
+    winit::{EventLoopProxyWrapper, WinitSettings},
 };
 use core::time::Duration;
 
@@ -96,7 +96,7 @@ fn update_winit(
             // `window/custom_user_event.rs` for an example usage from outside.
             // Note that in this example the `WakeUp` winit event will make the app run in the same
             // way as continuous
-            let _ = event_loop_proxy.send_event(WinitUserEvent::WakeUp);
+            event_loop_proxy.wake_up();
             WinitSettings::desktop_app()
         }
     };

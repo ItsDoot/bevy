@@ -3,10 +3,10 @@ use bevy_ecs::entity::Entity;
 use bevy_input::{
     keyboard::{KeyCode, KeyboardInput, NativeKeyCode},
     mouse::MouseButton,
-    touch::{ForceTouch, TouchInput, TouchPhase},
+    touch::TouchPhase,
     ButtonState,
 };
-use bevy_math::{CompassOctant, Vec2};
+use bevy_math::CompassOctant;
 use bevy_window::SystemCursorIcon;
 use bevy_window::{EnabledButtons, WindowLevel, WindowTheme};
 use winit::keyboard::{Key, NamedKey, NativeKey};
@@ -45,7 +45,33 @@ pub fn convert_mouse_button(mouse_button: winit::event::MouseButton) -> MouseBut
         winit::event::MouseButton::Middle => MouseButton::Middle,
         winit::event::MouseButton::Back => MouseButton::Back,
         winit::event::MouseButton::Forward => MouseButton::Forward,
-        winit::event::MouseButton::Other(val) => MouseButton::Other(val),
+        winit::event::MouseButton::Button6 => MouseButton::Other(6),
+        winit::event::MouseButton::Button7 => MouseButton::Other(7),
+        winit::event::MouseButton::Button8 => MouseButton::Other(8),
+        winit::event::MouseButton::Button9 => MouseButton::Other(9),
+        winit::event::MouseButton::Button10 => MouseButton::Other(10),
+        winit::event::MouseButton::Button11 => MouseButton::Other(11),
+        winit::event::MouseButton::Button12 => MouseButton::Other(12),
+        winit::event::MouseButton::Button13 => MouseButton::Other(13),
+        winit::event::MouseButton::Button14 => MouseButton::Other(14),
+        winit::event::MouseButton::Button15 => MouseButton::Other(15),
+        winit::event::MouseButton::Button16 => MouseButton::Other(16),
+        winit::event::MouseButton::Button17 => MouseButton::Other(17),
+        winit::event::MouseButton::Button18 => MouseButton::Other(18),
+        winit::event::MouseButton::Button19 => MouseButton::Other(19),
+        winit::event::MouseButton::Button20 => MouseButton::Other(20),
+        winit::event::MouseButton::Button21 => MouseButton::Other(21),
+        winit::event::MouseButton::Button22 => MouseButton::Other(22),
+        winit::event::MouseButton::Button23 => MouseButton::Other(23),
+        winit::event::MouseButton::Button24 => MouseButton::Other(24),
+        winit::event::MouseButton::Button25 => MouseButton::Other(25),
+        winit::event::MouseButton::Button26 => MouseButton::Other(26),
+        winit::event::MouseButton::Button27 => MouseButton::Other(27),
+        winit::event::MouseButton::Button28 => MouseButton::Other(28),
+        winit::event::MouseButton::Button29 => MouseButton::Other(29),
+        winit::event::MouseButton::Button30 => MouseButton::Other(30),
+        winit::event::MouseButton::Button31 => MouseButton::Other(31),
+        winit::event::MouseButton::Button32 => MouseButton::Other(32),
     }
 }
 
@@ -59,32 +85,6 @@ pub fn convert_touch_phase(phase: winit::event::TouchPhase) -> TouchPhase {
     }
 }
 
-/// Converts a [`winit::event::Touch`], [`winit::dpi::LogicalPosition<f64>`] and window [`Entity`] to a Bevy [`TouchInput`]
-pub fn convert_touch_input(
-    touch_input: winit::event::Touch,
-    location: winit::dpi::LogicalPosition<f64>,
-    window_entity: Entity,
-) -> TouchInput {
-    TouchInput {
-        phase: convert_touch_phase(touch_input.phase),
-        position: Vec2::new(location.x as f32, location.y as f32),
-        window: window_entity,
-        force: touch_input.force.map(|f| match f {
-            winit::event::Force::Calibrated {
-                force,
-                max_possible_force,
-                altitude_angle,
-            } => ForceTouch::Calibrated {
-                force,
-                max_possible_force,
-                altitude_angle,
-            },
-            winit::event::Force::Normalized(x) => ForceTouch::Normalized(x),
-        }),
-        id: touch_input.id,
-    }
-}
-
 /// Converts a [`winit::keyboard::NativeKeyCode`] to a Bevy [`NativeKeyCode`]
 pub fn convert_physical_native_key_code(
     native_key_code: winit::keyboard::NativeKeyCode,
@@ -95,6 +95,7 @@ pub fn convert_physical_native_key_code(
         winit::keyboard::NativeKeyCode::MacOS(scan_code) => NativeKeyCode::MacOS(scan_code),
         winit::keyboard::NativeKeyCode::Windows(scan_code) => NativeKeyCode::Windows(scan_code),
         winit::keyboard::NativeKeyCode::Xkb(key_code) => NativeKeyCode::Xkb(key_code),
+        winit::keyboard::NativeKeyCode::Ohos(scan_code) => NativeKeyCode::Ohos(scan_code),
     }
 }
 /// Converts a [`winit::keyboard::PhysicalKey`] to a Bevy [`KeyCode`]
@@ -162,8 +163,8 @@ pub fn convert_physical_key_code(virtual_key_code: winit::keyboard::PhysicalKey)
             winit::keyboard::KeyCode::ControlLeft => KeyCode::ControlLeft,
             winit::keyboard::KeyCode::ControlRight => KeyCode::ControlRight,
             winit::keyboard::KeyCode::Enter => KeyCode::Enter,
-            winit::keyboard::KeyCode::SuperLeft => KeyCode::SuperLeft,
-            winit::keyboard::KeyCode::SuperRight => KeyCode::SuperRight,
+            winit::keyboard::KeyCode::MetaLeft => KeyCode::SuperLeft,
+            winit::keyboard::KeyCode::MetaRight => KeyCode::SuperRight,
             winit::keyboard::KeyCode::ShiftLeft => KeyCode::ShiftLeft,
             winit::keyboard::KeyCode::ShiftRight => KeyCode::ShiftRight,
             winit::keyboard::KeyCode::Space => KeyCode::Space,
@@ -246,7 +247,6 @@ pub fn convert_physical_key_code(virtual_key_code: winit::keyboard::PhysicalKey)
             winit::keyboard::KeyCode::AudioVolumeMute => KeyCode::AudioVolumeMute,
             winit::keyboard::KeyCode::AudioVolumeUp => KeyCode::AudioVolumeUp,
             winit::keyboard::KeyCode::WakeUp => KeyCode::WakeUp,
-            winit::keyboard::KeyCode::Meta => KeyCode::Meta,
             winit::keyboard::KeyCode::Hyper => KeyCode::Hyper,
             winit::keyboard::KeyCode::Turbo => KeyCode::Turbo,
             winit::keyboard::KeyCode::Abort => KeyCode::Abort,
@@ -306,7 +306,13 @@ pub fn convert_physical_key_code(virtual_key_code: winit::keyboard::PhysicalKey)
 ///Converts a [`winit::keyboard::Key`] to a Bevy [`bevy_input::keyboard::Key`]
 pub fn convert_logical_key(logical_key_code: &Key) -> bevy_input::keyboard::Key {
     match logical_key_code {
-        Key::Character(s) => bevy_input::keyboard::Key::Character(s.clone()),
+        Key::Character(s) => {
+            if s == " " {
+                bevy_input::keyboard::Key::Space
+            } else {
+                bevy_input::keyboard::Key::Character(s.clone())
+            }
+        }
         Key::Unidentified(nk) => bevy_input::keyboard::Key::Unidentified(convert_native_key(nk)),
         Key::Dead(c) => bevy_input::keyboard::Key::Dead(c.to_owned()),
         Key::Named(NamedKey::Alt) => bevy_input::keyboard::Key::Alt,
@@ -325,7 +331,6 @@ pub fn convert_logical_key(logical_key_code: &Key) -> bevy_input::keyboard::Key 
         Key::Named(NamedKey::Super) => bevy_input::keyboard::Key::Super,
         Key::Named(NamedKey::Enter) => bevy_input::keyboard::Key::Enter,
         Key::Named(NamedKey::Tab) => bevy_input::keyboard::Key::Tab,
-        Key::Named(NamedKey::Space) => bevy_input::keyboard::Key::Space,
         Key::Named(NamedKey::ArrowDown) => bevy_input::keyboard::Key::ArrowDown,
         Key::Named(NamedKey::ArrowLeft) => bevy_input::keyboard::Key::ArrowLeft,
         Key::Named(NamedKey::ArrowRight) => bevy_input::keyboard::Key::ArrowRight,
@@ -644,46 +649,47 @@ pub fn convert_native_key(native_key: &NativeKey) -> bevy_input::keyboard::Nativ
         NativeKey::Windows(v) => bevy_input::keyboard::NativeKey::Windows(*v),
         NativeKey::Xkb(v) => bevy_input::keyboard::NativeKey::Xkb(*v),
         NativeKey::Web(v) => bevy_input::keyboard::NativeKey::Web(v.clone()),
+        NativeKey::Ohos(v) => bevy_input::keyboard::NativeKey::Ohos(*v),
     }
 }
 
-/// Converts a Bevy [`SystemCursorIcon`] to a [`winit::window::CursorIcon`].
-pub fn convert_system_cursor_icon(cursor_icon: SystemCursorIcon) -> winit::window::CursorIcon {
+/// Converts a Bevy [`SystemCursorIcon`] to a [`winit::cursor::CursorIcon`].
+pub fn convert_system_cursor_icon(cursor_icon: SystemCursorIcon) -> winit::cursor::CursorIcon {
     match cursor_icon {
-        SystemCursorIcon::Crosshair => winit::window::CursorIcon::Crosshair,
-        SystemCursorIcon::Pointer => winit::window::CursorIcon::Pointer,
-        SystemCursorIcon::Move => winit::window::CursorIcon::Move,
-        SystemCursorIcon::Text => winit::window::CursorIcon::Text,
-        SystemCursorIcon::Wait => winit::window::CursorIcon::Wait,
-        SystemCursorIcon::Help => winit::window::CursorIcon::Help,
-        SystemCursorIcon::Progress => winit::window::CursorIcon::Progress,
-        SystemCursorIcon::NotAllowed => winit::window::CursorIcon::NotAllowed,
-        SystemCursorIcon::ContextMenu => winit::window::CursorIcon::ContextMenu,
-        SystemCursorIcon::Cell => winit::window::CursorIcon::Cell,
-        SystemCursorIcon::VerticalText => winit::window::CursorIcon::VerticalText,
-        SystemCursorIcon::Alias => winit::window::CursorIcon::Alias,
-        SystemCursorIcon::Copy => winit::window::CursorIcon::Copy,
-        SystemCursorIcon::NoDrop => winit::window::CursorIcon::NoDrop,
-        SystemCursorIcon::Grab => winit::window::CursorIcon::Grab,
-        SystemCursorIcon::Grabbing => winit::window::CursorIcon::Grabbing,
-        SystemCursorIcon::AllScroll => winit::window::CursorIcon::AllScroll,
-        SystemCursorIcon::ZoomIn => winit::window::CursorIcon::ZoomIn,
-        SystemCursorIcon::ZoomOut => winit::window::CursorIcon::ZoomOut,
-        SystemCursorIcon::EResize => winit::window::CursorIcon::EResize,
-        SystemCursorIcon::NResize => winit::window::CursorIcon::NResize,
-        SystemCursorIcon::NeResize => winit::window::CursorIcon::NeResize,
-        SystemCursorIcon::NwResize => winit::window::CursorIcon::NwResize,
-        SystemCursorIcon::SResize => winit::window::CursorIcon::SResize,
-        SystemCursorIcon::SeResize => winit::window::CursorIcon::SeResize,
-        SystemCursorIcon::SwResize => winit::window::CursorIcon::SwResize,
-        SystemCursorIcon::WResize => winit::window::CursorIcon::WResize,
-        SystemCursorIcon::EwResize => winit::window::CursorIcon::EwResize,
-        SystemCursorIcon::NsResize => winit::window::CursorIcon::NsResize,
-        SystemCursorIcon::NeswResize => winit::window::CursorIcon::NeswResize,
-        SystemCursorIcon::NwseResize => winit::window::CursorIcon::NwseResize,
-        SystemCursorIcon::ColResize => winit::window::CursorIcon::ColResize,
-        SystemCursorIcon::RowResize => winit::window::CursorIcon::RowResize,
-        _ => winit::window::CursorIcon::Default,
+        SystemCursorIcon::Crosshair => winit::cursor::CursorIcon::Crosshair,
+        SystemCursorIcon::Pointer => winit::cursor::CursorIcon::Pointer,
+        SystemCursorIcon::Move => winit::cursor::CursorIcon::Move,
+        SystemCursorIcon::Text => winit::cursor::CursorIcon::Text,
+        SystemCursorIcon::Wait => winit::cursor::CursorIcon::Wait,
+        SystemCursorIcon::Help => winit::cursor::CursorIcon::Help,
+        SystemCursorIcon::Progress => winit::cursor::CursorIcon::Progress,
+        SystemCursorIcon::NotAllowed => winit::cursor::CursorIcon::NotAllowed,
+        SystemCursorIcon::ContextMenu => winit::cursor::CursorIcon::ContextMenu,
+        SystemCursorIcon::Cell => winit::cursor::CursorIcon::Cell,
+        SystemCursorIcon::VerticalText => winit::cursor::CursorIcon::VerticalText,
+        SystemCursorIcon::Alias => winit::cursor::CursorIcon::Alias,
+        SystemCursorIcon::Copy => winit::cursor::CursorIcon::Copy,
+        SystemCursorIcon::NoDrop => winit::cursor::CursorIcon::NoDrop,
+        SystemCursorIcon::Grab => winit::cursor::CursorIcon::Grab,
+        SystemCursorIcon::Grabbing => winit::cursor::CursorIcon::Grabbing,
+        SystemCursorIcon::AllScroll => winit::cursor::CursorIcon::AllScroll,
+        SystemCursorIcon::ZoomIn => winit::cursor::CursorIcon::ZoomIn,
+        SystemCursorIcon::ZoomOut => winit::cursor::CursorIcon::ZoomOut,
+        SystemCursorIcon::EResize => winit::cursor::CursorIcon::EResize,
+        SystemCursorIcon::NResize => winit::cursor::CursorIcon::NResize,
+        SystemCursorIcon::NeResize => winit::cursor::CursorIcon::NeResize,
+        SystemCursorIcon::NwResize => winit::cursor::CursorIcon::NwResize,
+        SystemCursorIcon::SResize => winit::cursor::CursorIcon::SResize,
+        SystemCursorIcon::SeResize => winit::cursor::CursorIcon::SeResize,
+        SystemCursorIcon::SwResize => winit::cursor::CursorIcon::SwResize,
+        SystemCursorIcon::WResize => winit::cursor::CursorIcon::WResize,
+        SystemCursorIcon::EwResize => winit::cursor::CursorIcon::EwResize,
+        SystemCursorIcon::NsResize => winit::cursor::CursorIcon::NsResize,
+        SystemCursorIcon::NeswResize => winit::cursor::CursorIcon::NeswResize,
+        SystemCursorIcon::NwseResize => winit::cursor::CursorIcon::NwseResize,
+        SystemCursorIcon::ColResize => winit::cursor::CursorIcon::ColResize,
+        SystemCursorIcon::RowResize => winit::cursor::CursorIcon::RowResize,
+        _ => winit::cursor::CursorIcon::Default,
     }
 }
 

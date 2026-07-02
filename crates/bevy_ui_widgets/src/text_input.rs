@@ -517,6 +517,7 @@ fn on_ime_input(
                     value: value.as_str().into(),
                 });
             }
+            Ime::DeleteSurrounding { .. } => {}
             Ime::Disabled { .. } => {
                 // IME was force-disabled; cancel any in-progress composition.
                 editable_text.queue_edit(TextEdit::clear_ime_compose());

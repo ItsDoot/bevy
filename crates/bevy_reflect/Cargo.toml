@@ -123,7 +123,7 @@ glam = { version = "0.33.2", default-features = false, features = [
 ], optional = true }
 indexmap = { version = "2.5.0", default-features = false, optional = true }
 petgraph = { version = "0.8", features = ["serde-1"], optional = true }
-smol_str = { version = "0.2.0", default-features = false, features = [
+smol_str = { version = "0.3.0", default-features = false, features = [
   "serde",
 ], optional = true }
 uuid = { version = "1.21.0", default-features = false, optional = true, features = [

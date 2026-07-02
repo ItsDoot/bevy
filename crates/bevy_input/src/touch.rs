@@ -95,12 +95,6 @@ pub enum ForceTouch {
         /// The value of this field is sufficiently high to provide a wide
         /// dynamic range for values of the `force` field.
         max_possible_force: f64,
-        /// The altitude (in radians) of the stylus.
-        ///
-        /// A value of 0 radians indicates that the stylus is parallel to the
-        /// surface. The value of this property is Pi/2 when the stylus is
-        /// perpendicular to the surface.
-        altitude_angle: Option<f64>,
     },
     /// If the platform reports the force as normalized, we have no way of
     /// knowing how much pressure 1.0 corresponds to – we know it's the maximum

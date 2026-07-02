@@ -18,6 +18,7 @@ use bevy_derive::Deref;
 use bevy_reflect::Reflect;
 use bevy_window::{ExitSystems, RawHandleWrapperHolder, WindowEvent};
 use core::cell::RefCell;
+use std::sync::mpsc::channel;
 use winit::{event_loop::EventLoop, window::WindowId};
 
 use bevy_a11y::AccessibilityRequested;
@@ -26,12 +27,9 @@ use bevy_ecs::prelude::*;
 use bevy_window::{CursorOptions, Window, WindowCreated};
 use system::{changed_cursor_options, changed_windows, check_keyboard_focus_lost, despawn_windows};
 pub use system::{create_monitors, create_windows};
+pub use winit::event_loop::EventLoopProxy;
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
 pub use winit::platform::web::CustomCursorExtWebSys;
-pub use winit::{
-    event_loop::EventLoopProxy,
-    window::{CustomCursor as WinitCustomCursor, CustomCursorSource},
-};
 pub use winit_config::*;
 pub use winit_monitors::*;
 pub use winit_windows::*;
@@ -82,7 +80,7 @@ impl Plugin for WinitPlugin {
     }
 
     fn build(&self, app: &mut App) {
-        let mut event_loop_builder = EventLoop::<WinitUserEvent>::with_user_event();
+        let mut event_loop_builder = EventLoop::builder();
 
         // linux check is needed because x11 might be enabled on other platforms.
         #[cfg(all(target_os = "linux", feature = "x11"))]
@@ -138,13 +136,15 @@ impl Plugin for WinitPlugin {
 
         let event_loop_proxy = event_loop.create_proxy();
 
+        let (user_events_tx, user_events_rx) = channel::<WinitUserEvent>();
+
         // Wake up the event loop when `Ctrl+C` is received so that the app can
         // exit even while idle in a reactive update mode
         #[cfg(any(all(unix, not(target_os = "horizon")), windows))]
         {
-            let event_loop_proxy = event_loop_proxy.clone();
+            let user_events_tx = user_events_tx.clone();
             bevy_app::TerminalCtrlCHandlerPlugin::register_exit_handler(move || {
-                let _ = event_loop_proxy.send_event(WinitUserEvent::WakeUp);
+                let _ = user_events_tx.send(WinitUserEvent::WakeUp);
             });
         }
 
@@ -153,7 +153,7 @@ impl Plugin for WinitPlugin {
             .insert_resource(DisplayHandleWrapper(event_loop.owned_display_handle()))
             .insert_resource(EventLoopProxyWrapper(event_loop_proxy))
             .add_message::<RawWinitWindowEvent>()
-            .set_runner(|app| winit_runner(app, event_loop))
+            .set_runner(|app| winit_runner(app, event_loop, user_events_rx))
             .add_systems(
                 Last,
                 (
@@ -168,13 +168,10 @@ impl Plugin for WinitPlugin {
         app.add_plugins(AccessKitPlugin);
         app.add_plugins(cursor::WinitCursorPlugin);
 
-        app.add_observer(
-            |_window: On<Add<Window>>, event_loop_proxy: Res<EventLoopProxyWrapper>| -> Result {
-                event_loop_proxy.send_event(WinitUserEvent::WindowAdded)?;
-
-                Ok(())
-            },
-        );
+        app.add_observer(move |_window: On<Add<Window>>| -> Result {
+            user_events_tx.send(WinitUserEvent::WindowAdded)?;
+            Ok(())
+        });
     }
 }
 
@@ -224,7 +221,7 @@ pub struct RawWinitWindowEvent {
 ///
 /// Use `Res<EventLoopProxyWrapper>` to retrieve this resource.
 #[derive(Resource, Deref)]
-pub struct EventLoopProxyWrapper(EventLoopProxy<WinitUserEvent>);
+pub struct EventLoopProxyWrapper(EventLoopProxy);
 
 /// A wrapper around [`winit::event_loop::OwnedDisplayHandle`]
 ///
