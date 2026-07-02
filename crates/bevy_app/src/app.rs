@@ -1614,6 +1614,15 @@ impl From<u8> for AppExit {
     }
 }
 
+impl From<AppExit> for u8 {
+    fn from(value: AppExit) -> Self {
+        match value {
+            AppExit::Success => 0,
+            AppExit::Error(code) => code.get(),
+        }
+    }
+}
+
 #[cfg(feature = "std")]
 impl Termination for AppExit {
     fn report(self) -> ExitCode {

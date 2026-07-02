@@ -1,16 +1,16 @@
 //! Helpers for mapping window entities to accessibility types
 
+use accesskit_adapter::Adapter;
 use alloc::{collections::VecDeque, sync::Arc};
 use bevy_input_focus::InputFocus;
 use core::cell::RefCell;
 use std::sync::Mutex;
-use winit::event_loop::ActiveEventLoop;
+use winit::raw_window_handle::HasWindowHandle;
 
 use accesskit::{
     ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, Node, NodeId, Role, Tree,
-    TreeId, TreeUpdate,
+    TreeUpdate,
 };
-use accesskit_winit::Adapter;
 use bevy_a11y::{
     AccessibilityNode, AccessibilityRequested, AccessibilitySystems,
     ActionRequest as ActionRequestWrapper, ManageAccessibilityUpdates,
@@ -87,7 +87,6 @@ impl AccessKitState {
         TreeUpdate {
             nodes: vec![(accesskit_window_id, root)],
             tree: Some(tree),
-            tree_id: TreeId::ROOT,
             focus: accesskit_window_id,
         }
     }
@@ -131,8 +130,7 @@ impl DeactivationHandler for WinitDeactivationHandler {
 
 /// Prepares accessibility for a winit window.
 pub(crate) fn prepare_accessibility_for_window(
-    event_loop: &ActiveEventLoop,
-    winit_window: &winit::window::Window,
+    winit_window: &dyn winit::window::Window,
     entity: Entity,
     name: String,
     accessibility_requested: AccessibilityRequested,
@@ -146,9 +144,8 @@ pub(crate) fn prepare_accessibility_for_window(
     let action_handler = WinitActionHandler::new(Arc::clone(&action_request_handler));
     let deactivation_handler = WinitDeactivationHandler;
 
-    let adapter = Adapter::with_direct_handlers(
-        event_loop,
-        winit_window,
+    let adapter = Adapter::with_split_handlers(
+        &winit_window.window_handle().unwrap().as_raw(),
         activation_handler,
         action_handler,
         deactivation_handler,
@@ -267,7 +264,6 @@ fn update_adapter(
     TreeUpdate {
         nodes: to_update,
         tree: None,
-        tree_id: TreeId::ROOT,
         focus: NodeId(focus.get().unwrap_or(primary_window_id).to_bits()),
     }
 }

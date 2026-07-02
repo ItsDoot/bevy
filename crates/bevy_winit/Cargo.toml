@@ -63,12 +63,11 @@ bytemuck = { version = "1.5", optional = true }
 
 # other
 # feature rwh_06 refers to window_raw_handle@v0.6
-winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
-accesskit_winit = { version = "0.33", default-features = false, features = [
-  "rwh_06",
-] }
+winit = { git = "https://github.com/rust-windowing/winit", rev = "27e17e3", default-features = false }
+accesskit_winit = { git = "https://github.com/ItsDoot/accesskit", rev = "7a000e2", default-features = false }
 approx = { version = "0.5", default-features = false }
-accesskit = "0.24"
+accesskit = { git = "https://github.com/ItsDoot/accesskit", rev = "7a000e2" }
+accesskit_adapter = { git = "https://github.com/ItsDoot/accesskit", rev = "7a000e2" }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 [target.'cfg(target_os = "android")'.dependencies]

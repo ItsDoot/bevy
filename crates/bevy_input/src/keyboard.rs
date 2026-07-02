@@ -236,6 +236,8 @@ pub enum NativeKeyCode {
     Windows(u16),
     /// An XKB "keycode".
     Xkb(u32),
+    /// An Open Harmony OS "scancode".
+    Ohos(u32),
 }
 
 /// The key code of a [`KeyboardInput`].
@@ -777,6 +779,8 @@ pub enum NativeKey {
     Xkb(u32),
     /// A "key value string".
     Web(SmolStr),
+    /// An Open Harmony OS "scancode".
+    Ohos(u32),
 }
 
 /// The logical key code of a [`KeyboardInput`].

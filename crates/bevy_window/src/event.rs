@@ -271,6 +271,15 @@ pub enum Ime {
         /// Input string
         value: String,
     },
+    /// Delete text surrounding the cursor or selection.
+    DeleteSurrounding {
+        /// Window that received the event.
+        window: Entity,
+        /// Number of bytes to delete before the cursor position.
+        before_bytes: usize,
+        /// Number of bytes to delete after the cursor position.
+        after_bytes: usize,
+    },
     /// Notifies when the IME was enabled.
     ///
     /// After this event, you will receive events `Ime::Preedit` and `Ime::Commit`.
