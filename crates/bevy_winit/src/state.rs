@@ -85,7 +85,7 @@ pub(crate) struct WinitAppRunnerState {
     raw_winit_events: Vec<RawWinitWindowEvent>,
     /// Receiver for user events sent to the event loop.
     user_events: Receiver<WinitUserEvent>,
-
+    create_windows_state: SystemState<CreateWindowParams<'static, 'static>>,
     windows_system_state: SystemState<
         Query<
             'static,
@@ -103,6 +103,8 @@ pub(crate) struct WinitAppRunnerState {
 
 impl WinitAppRunnerState {
     fn new(mut app: App, user_events_rx: Receiver<WinitUserEvent>) -> Self {
+        let create_windows_state: SystemState<CreateWindowParams<'static, 'static>> =
+            SystemState::new(app.world_mut());
         let windows_system_state: SystemState<
             Query<(&mut Window, &mut CachedWindow, &mut WinitWindowPressedKeys)>,
         > = SystemState::new(app.world_mut());
@@ -124,6 +126,7 @@ impl WinitAppRunnerState {
             bevy_window_events: Vec::new(),
             raw_winit_events: Vec::new(),
             user_events: user_events_rx,
+            create_windows_state,
             windows_system_state,
             scheduled_tick_start: None,
         }
@@ -201,9 +204,13 @@ impl ApplicationHandler for WinitAppRunnerState {
         self.lifecycle = AppLifecycle::WillResume;
 
         // Create the initial window(s) if needed
-        let mut create_window = SystemState::<CreateWindowParams>::from_world(self.world_mut());
-        create_windows(event_loop, create_window.get_mut(self.world_mut()).unwrap());
-        create_window.apply(self.world_mut());
+        create_windows(
+            event_loop,
+            self.create_windows_state
+                .get_mut(self.app.world_mut())
+                .unwrap(),
+        );
+        self.create_windows_state.apply(self.app.world_mut());
     }
 
     fn destroy_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {}
@@ -216,13 +223,13 @@ impl ApplicationHandler for WinitAppRunnerState {
                     self.redraw_requested = true;
                 }
                 WinitUserEvent::WindowAdded => {
-                    let mut create_window =
-                        SystemState::<CreateWindowParams>::from_world(self.app.world_mut());
                     create_windows(
                         event_loop,
-                        create_window.get_mut(self.app.world_mut()).unwrap(),
+                        self.create_windows_state
+                            .get_mut(self.app.world_mut())
+                            .unwrap(),
                     );
-                    create_window.apply(self.app.world_mut());
+                    self.create_windows_state.apply(self.app.world_mut());
                 }
             }
         }
