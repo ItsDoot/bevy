@@ -67,6 +67,7 @@ bevy_reflect = { path = "../bevy_reflect", version = "0.20.0-dev", default-featu
 ], optional = true }
 
 # other
+bitflags = "2.11"
 serde = { version = "1.0", features = [
   "alloc",
   "derive",

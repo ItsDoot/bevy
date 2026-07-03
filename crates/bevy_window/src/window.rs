@@ -1,6 +1,7 @@
 #[cfg(feature = "std")]
 use alloc::format;
 use alloc::{borrow::ToOwned, string::String};
+use bitflags::bitflags;
 use core::num::NonZero;
 
 use bevy_ecs::{
@@ -475,6 +476,36 @@ pub struct Window {
     ///
     /// [`WindowAttributesExtIOS::with_preferred_screen_edges_deferring_system_gestures`]: https://docs.rs/winit/latest/x86_64-apple-darwin/winit/platform/ios/trait.WindowAttributesExtIOS.html#tymethod.with_preferred_screen_edges_deferring_system_gestures
     pub preferred_screen_edges_deferring_system_gestures: ScreenEdge,
+    /// Sets the wayland-layer-shell layer of the window.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only used on Wayland with the layer-shell protocol.
+    pub layer: Option<Layer>,
+    /// Sets the wayland-layer-shell anchor of the window.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only used on Wayland with the layer-shell protocol.
+    pub anchor: Option<Anchor>,
+    /// Sets the wayland-layer-shell keyboard interactivity of the window.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only used on Wayland with the layer-shell protocol.
+    pub keyboard_interactivity: Option<KeyboardInteractivity>,
+    /// Sets the wayland-layer-shell exclusive zone of the window.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only used on Wayland with the layer-shell protocol.
+    pub exclusive_zone: Option<i32>,
+    /// Sets the wayland-layer-shell namespace of the window.
+    ///
+    /// ## Platform-specific
+    ///
+    /// - Only used on Wayland with the layer-shell protocol.
+    pub namespace: Option<String>,
 }
 
 impl Default for Window {
@@ -520,6 +551,11 @@ impl Default for Window {
             prefers_home_indicator_hidden: false,
             prefers_status_bar_hidden: false,
             preferred_screen_edges_deferring_system_gestures: Default::default(),
+            layer: None,
+            anchor: None,
+            keyboard_interactivity: None,
+            exclusive_zone: None,
+            namespace: None,
         }
     }
 }
@@ -1493,6 +1529,78 @@ pub enum ScreenEdge {
     Right,
     /// All edges of the screen.
     All,
+}
+
+/// The z-depth of a layer.
+///
+/// These values indicate which order in which layer windows/surfaces are rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum Layer {
+    /// The window is in the background layer, below all other windows.
+    Background,
+    /// The window is in the bottom layer, below normal windows but above background windows.
+    Bottom,
+    /// The window is in the top layer, above normal windows but below overlay windows.
+    Top,
+    /// The window is in the overlay layer, above all other windows.
+    Overlay,
+}
+
+/// Specifies which edges and corners a layer should be placed at in the anchor rectangle.
+///
+/// A combination of two orthogonal edges will cause the layer's anchor point to be the intersection of
+/// the edges. For example [`Anchor::TOP`] and [`Anchor::LEFT`] will result in an anchor point in the top
+/// left of the anchor rectangle.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct Anchor(u32);
+
+bitflags! {
+    impl Anchor: u32 {
+        /// Top edge of the anchor rectangle.
+        const TOP = 1;
+
+        /// The bottom edge of the anchor rectangle.
+        const BOTTOM = 2;
+
+        /// The left edge of the anchor rectangle.
+        const LEFT = 4;
+
+        /// The right edge of the anchor rectangle.
+        const RIGHT = 8;
+    }
+}
+
+/// Specifies how a layer should interact with the keyboard focus of the system.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "bevy_reflect", derive(Reflect))]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum KeyboardInteractivity {
+    /// No keyboard focus is possible.
+    ///
+    /// This is the default value for all newly created layer shells.
+    #[default]
+    None,
+
+    /// Request exclusive keyboard focus if the layer is above shell surfaces.
+    ///
+    /// For [`Layer::Top`] and [`Layer::Overlay`], the seat will always give exclusive access to the layer
+    /// which has this interactivity mode set.
+    ///
+    /// This setting is intended for applications that need to ensure they receive all keyboard events, such
+    /// as a lock screen or a password prompt.
+    Exclusive,
+
+    /// The compositor should focus and unfocus this surface by the user in an implementation specific manner.
+    ///
+    /// Compositors may use their normal mechanisms to manage keyboard focus between layers and regular
+    /// desktop surfaces.
+    ///
+    /// This setting is intended for applications which allow keyboard interaction.  
+    OnDemand,
 }
 
 #[cfg(test)]

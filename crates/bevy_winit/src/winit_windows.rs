@@ -181,9 +181,75 @@ impl WinitWindows {
         };
         bevy_log::debug!("{display_info}");
 
+        #[cfg(all(
+            feature = "wayland",
+            any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "openbsd"
+            )
+        ))]
+        {
+            let mut wayland_attrs = winit::platform::wayland::WindowAttributesWayland::default();
+
+            if let Some(name) = &window.name {
+                wayland_attrs = wayland_attrs.with_name(name.clone(), "");
+            }
+
+            if let Some(layer) = window.layer {
+                let layer = match layer {
+                    bevy_window::Layer::Background => winit::platform::wayland::Layer::Background,
+                    bevy_window::Layer::Bottom => winit::platform::wayland::Layer::Bottom,
+                    bevy_window::Layer::Top => winit::platform::wayland::Layer::Top,
+                    bevy_window::Layer::Overlay => winit::platform::wayland::Layer::Overlay,
+                };
+                wayland_attrs = wayland_attrs.with_layer_shell().with_layer(layer);
+            }
+
+            if let Some(anchor) = window.anchor {
+                wayland_attrs = wayland_attrs.with_layer_shell().with_anchor(
+                    winit::platform::wayland::Anchor::from_bits_retain(anchor.bits()),
+                );
+            }
+
+            if let Some(keyboard_interactivity) = window.keyboard_interactivity {
+                let keyboard_interactivity = match keyboard_interactivity {
+                    bevy_window::KeyboardInteractivity::None => {
+                        winit::platform::wayland::KeyboardInteractivity::None
+                    }
+                    bevy_window::KeyboardInteractivity::OnDemand => {
+                        winit::platform::wayland::KeyboardInteractivity::OnDemand
+                    }
+                    bevy_window::KeyboardInteractivity::Exclusive => {
+                        winit::platform::wayland::KeyboardInteractivity::Exclusive
+                    }
+                };
+                wayland_attrs = wayland_attrs
+                    .with_layer_shell()
+                    .with_keyboard_interactivity(keyboard_interactivity);
+            }
+
+            if let Some(exclusive_zone) = window.exclusive_zone {
+                wayland_attrs = wayland_attrs
+                    .with_layer_shell()
+                    .with_exclusive_zone(exclusive_zone);
+            }
+
+            if let Some(namespace) = &window.namespace {
+                wayland_attrs = wayland_attrs
+                    .with_layer_shell()
+                    .with_namespace(namespace.clone());
+            }
+
+            winit_window_attributes =
+                winit_window_attributes.with_platform_attributes(Box::new(wayland_attrs));
+        }
+
         #[cfg(any(
             all(
-                any(feature = "wayland", feature = "x11"),
+                feature = "x11",
                 any(
                     target_os = "linux",
                     target_os = "dragonfly",
@@ -195,24 +261,6 @@ impl WinitWindows {
             target_os = "windows"
         ))]
         if let Some(name) = &window.name {
-            #[cfg(all(
-                feature = "wayland",
-                any(
-                    target_os = "linux",
-                    target_os = "dragonfly",
-                    target_os = "freebsd",
-                    target_os = "netbsd",
-                    target_os = "openbsd"
-                )
-            ))]
-            {
-                winit_window_attributes =
-                    winit_window_attributes.with_platform_attributes(Box::new(
-                        winit::platform::wayland::WindowAttributesWayland::default()
-                            .with_name(name.clone(), ""),
-                    ));
-            }
-
             #[cfg(all(
                 feature = "x11",
                 any(
