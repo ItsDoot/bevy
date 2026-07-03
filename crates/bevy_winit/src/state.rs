@@ -1,7 +1,7 @@
+use alloc::sync::Arc;
 use std::sync::{
     atomic::{AtomicU8, Ordering},
-    mpsc::{channel, Receiver},
-    Arc,
+    mpsc::Receiver,
 };
 
 use approx::relative_eq;
@@ -189,20 +189,24 @@ impl ApplicationHandler for WinitAppRunnerState {
         };
     }
 
-    fn resumed(&mut self, event_loop: &dyn ActiveEventLoop) {
+    fn resumed(&mut self, _event_loop: &dyn ActiveEventLoop) {
+        // Mark the state as `WillResume`. This will let the schedule run one extra time
+        // when actually resuming the app
+        self.lifecycle = AppLifecycle::WillResume;
+    }
+
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
         // Mark the state as `WillResume`. This will let the schedule run one extra time
         // when actually resuming the app
         self.lifecycle = AppLifecycle::WillResume;
 
-        // Create the initial window if needed
+        // Create the initial window(s) if needed
         let mut create_window = SystemState::<CreateWindowParams>::from_world(self.world_mut());
         create_windows(event_loop, create_window.get_mut(self.world_mut()).unwrap());
         create_window.apply(self.world_mut());
     }
 
-    fn can_create_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {
-        // TODO???
-    }
+    fn destroy_surfaces(&mut self, _event_loop: &dyn ActiveEventLoop) {}
 
     fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         for event in self.user_events.try_iter() {
