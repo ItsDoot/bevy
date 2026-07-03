@@ -41,7 +41,7 @@ bevy_derive = { path = "../bevy_derive", version = "0.20.0-dev" }
 smol_str = { version = "0.3", default-features = false }
 
 # other
-accesskit = { git = "https://github.com/ItsDoot/accesskit", rev = "7a000e2" }
+accesskit = { git = "https://github.com/ItsDoot/accesskit", rev = "727d031" }
 
 [features]
 default = []
